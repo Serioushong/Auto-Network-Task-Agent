@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-plan-harness.local/contracts/task.schema.json",
+  "title": "Task",
+  "description": "Task tree node. FR-004 / FR-005 / FR-008 / FR-010 / FR-017 / FR-018 / FR-028.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "traceId", "kind", "state", "payload", "createdAt"],
+  "properties": {
+    "taskId": {"type": "string", "minLength": 16, "maxLength": 64, "description": "ULID"},
+    "parentTaskId": {
+      "oneOf": [
+        {"type": "string", "minLength": 16, "maxLength": 64},
+        {"type": "null"}
+      ],
+      "description": "null only when kind=root_intent."
+    },
+    "traceId": {"type": "string", "minLength": 16, "maxLength": 64},
+    "kind": {"type": "string", "enum": ["root_intent", "leaf_action"]},
+    "capability": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Required when kind=leaf_action. Must match a registered Worker capability."
+    },
+    "riskLevel": {
+      "type": "string",
+      "enum": ["NORMAL", "HIGH_RISK"],
+      "description": "Required when kind=leaf_action. HIGH_RISK triggers pending_approval gate (FR-010)."
+    },
+    "budget": {
+      "$ref": "./budget.schema.json",
+      "description": "Required when kind=leaf_action."
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "pending_approval",
+        "dispatched",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "denied",
+        "denied_by_timeout"
+      ]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["succeeded", "failed", "cancelled", "denied", "denied_by_timeout"],
+      "description": "Present iff state is terminal."
+    },
+    "failureReason": {
+      "type": "string",
+      "enum": [
+        "no_capable_worker",
+        "sandbox_limit",
+        "budget_exceeded",
+        "worker_crashed",
+        "hard_terminated",
+        "kernel_restart",
+        "user_rejected",
+        "approval_timeout"
+      ],
+      "description": "Present for failed/denied outcomes."
+    },
+    "failureDim": {
+      "type": "string",
+      "enum": ["wall", "tool", "token"],
+      "description": "Only when failureReason=budget_exceeded (FR-018)."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Dispatch payload. Redacted copy hashed into audit input_hash (FR-020)."
+    },
+    "resultHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "SHA-256 truncated to first 16 bytes (32 hex chars). Only when outcome=succeeded."
+    },
+    "assignedWorkerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Set when state transitions to dispatched."
+    },
+    "createdAt": {"type": "string", "format": "date-time"},
+    "dispatchedAt": {"type": "string", "format": "date-time"},
+    "startedAt": {"type": "string", "format": "date-time"},
+    "terminalAt": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"kind": {"const": "leaf_action"}}},
+      "then": {
+        "required": ["capability", "riskLevel", "budget"]
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "root_intent"}}},
+      "then": {
+        "properties": {
+          "parentTaskId": {"type": "null"}
+        }
+      }
+    }
+  ]
+}

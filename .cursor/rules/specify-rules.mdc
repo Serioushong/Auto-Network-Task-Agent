@@ -3,6 +3,22 @@ alwaysApply: true
 ---
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+Active feature: **001-orchestrator-kernel** (主 Agent 编排内核 MVP)
+Active branch per Constitution Article VIII: `hjx`
+
+Key project artifacts (read these before making changes):
+- `.specify/memory/constitution.md` — project constitution v1.0.0 (8 principles, non-negotiable)
+- `specs/001-orchestrator-kernel/spec.md` — feature specification (31 FR, 11 SC, clarify done)
+- `specs/001-orchestrator-kernel/plan.md` — implementation plan (Python 3.11, asyncio, subprocess stdio)
+- `specs/001-orchestrator-kernel/research.md` — tech decisions & rationale (R-01..R-10)
+- `specs/001-orchestrator-kernel/data-model.md` — entities, state machines, 8 invariants
+- `specs/001-orchestrator-kernel/contracts/` — JSON Schema Draft 2020-12 for all boundary messages
+
+Non-negotiable rules derived from constitution:
+- All development commits go to `hjx`; `main` is protected (Article VIII)
+- No code before `/speckit-tasks` & `/speckit-analyze` complete (Article I)
+- All cross-boundary messages MUST have pydantic + JSON Schema contract (Article VII)
+- HIGH_RISK capabilities MUST pass through `pending_approval` gate (Article III)
+- All state changes MUST emit structured JSONL audit events with sensitive-field redaction (Article IV)
+- Worker isolation: subprocess + Windows Job Object + soft-abort (CTRL_BREAK_EVENT) → hard (Article V)
 <!-- SPECKIT END -->

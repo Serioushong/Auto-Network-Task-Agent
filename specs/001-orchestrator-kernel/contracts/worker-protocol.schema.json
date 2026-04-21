@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-plan-harness.local/contracts/worker-protocol.schema.json",
+  "title": "WorkerProtocolFrame",
+  "description": "Kernel <-> Worker stdio JSON-lines protocol. One JSON object per line, UTF-8. FR-008 / FR-014 / FR-016.",
+  "oneOf": [
+    {"$ref": "#/$defs/RegisterFrame"},
+    {"$ref": "#/$defs/DispatchFrame"},
+    {"$ref": "#/$defs/StartedFrame"},
+    {"$ref": "#/$defs/ResultFrame"},
+    {"$ref": "#/$defs/HeartbeatFrame"},
+    {"$ref": "#/$defs/AbortFrame"},
+    {"$ref": "#/$defs/ShutdownFrame"}
+  ],
+  "$defs": {
+    "RegisterFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "registration"],
+      "properties": {
+        "kind": {"const": "register"},
+        "registration": {"$ref": "./worker-registration.schema.json"}
+      },
+      "description": "Worker -> Kernel: sent as the first frame after spawn."
+    },
+    "DispatchFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "taskId", "traceId", "capability", "payload", "budget", "deadline"],
+      "properties": {
+        "kind": {"const": "dispatch"},
+        "taskId": {"type": "string", "minLength": 16, "maxLength": 64},
+        "traceId": {"type": "string", "minLength": 16, "maxLength": 64},
+        "capability": {"type": "string", "maxLength": 64},
+        "payload": {"type": "object"},
+        "budget": {"$ref": "./budget.schema.json"},
+        "deadline": {"type": "string", "format": "date-time", "description": "Absolute wall-clock deadline derived from budget.wall_clock_ms + dispatchedAt."}
+      },
+      "description": "Kernel -> Worker."
+    },
+    "StartedFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "taskId", "startedAt"],
+      "properties": {
+        "kind": {"const": "started"},
+        "taskId": {"type": "string"},
+        "startedAt": {"type": "string", "format": "date-time"}
+      },
+      "description": "Worker -> Kernel: acknowledges dispatch and begins work."
+    },
+    "ResultFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "taskId", "outcome", "finishedAt"],
+      "properties": {
+        "kind": {"const": "result"},
+        "taskId": {"type": "string"},
+        "outcome": {"type": "string", "enum": ["succeeded", "failed"]},
+        "resultHash": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "output": {"type": "object", "description": "Optional structured output; redacted before audit."},
+        "failureReason": {
+          "type": "string",
+          "enum": ["worker_internal_error", "budget_exceeded", "invalid_payload"],
+          "description": "Worker-side reported failure. Kernel-side failures (sandbox_limit, hard_terminated, kernel_restart) never come through this frame."
+        },
+        "failureDim": {"type": "string", "enum": ["wall", "tool", "token"]},
+        "finishedAt": {"type": "string", "format": "date-time"}
+      },
+      "description": "Worker -> Kernel: final per-task report."
+    },
+    "HeartbeatFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "workerId", "timestamp"],
+      "properties": {
+        "kind": {"const": "heartbeat"},
+        "workerId": {"type": "string"},
+        "timestamp": {"type": "string", "format": "date-time"},
+        "activeTaskIds": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Currently running taskIds; empty if idle."
+        }
+      },
+      "description": "Worker -> Kernel: liveness signal. FR-009 missing 3 consecutive heartbeats -> unhealthy."
+    },
+    "AbortFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "taskId", "reason"],
+      "properties": {
+        "kind": {"const": "abort"},
+        "taskId": {"type": "string"},
+        "reason": {"type": "string", "enum": ["user_cancel", "budget_exceeded", "kernel_shutdown"]}
+      },
+      "description": "Kernel -> Worker: cooperative abort notice. OS signal (CTRL_BREAK_EVENT/SIGTERM) sent in parallel per R-08."
+    },
+    "ShutdownFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"const": "shutdown"}
+      },
+      "description": "Kernel -> Worker: graceful exit request."
+    }
+  }
+}

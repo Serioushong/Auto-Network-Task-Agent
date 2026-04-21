@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-plan-harness.local/contracts/result-summary.schema.json",
+  "title": "ResultSummary",
+  "description": "Kernel -> User final-state push via original sourceChannel. FR-029 / FR-030.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "traceId",
+    "eventId",
+    "userId",
+    "commandDigest",
+    "traceOutcome",
+    "leafResults",
+    "message",
+    "preparedAt",
+    "deliveryAttempt"
+  ],
+  "properties": {
+    "kind": {"const": "result_summary"},
+    "traceId": {"type": "string", "minLength": 16, "maxLength": 64},
+    "eventId": {"type": "string", "minLength": 16, "maxLength": 64},
+    "userId": {"type": "string", "maxLength": 128},
+    "commandDigest": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "One-line digest of original text, redacted per FR-020."
+    },
+    "traceOutcome": {
+      "type": "string",
+      "enum": [
+        "all_succeeded",
+        "partial_failed",
+        "all_failed",
+        "cancelled",
+        "denied",
+        "rejected",
+        "kernel_restarted"
+      ]
+    },
+    "leafResults": {
+      "type": "array",
+      "minItems": 0,
+      "items": {"$ref": "#/$defs/LeafResult"},
+      "description": "Empty when traceOutcome=rejected (no Task ever created)."
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Human-readable conclusion. MUST include 'system interrupted; re-submit with a NEW eventId' when traceOutcome=kernel_restarted."
+    },
+    "preparedAt": {"type": "string", "format": "date-time"},
+    "deliveryAttempt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "description": "0 = first delivery; increments on each retry. Max 3 per FR-029 / R-09."
+    }
+  },
+  "$defs": {
+    "LeafResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "capability", "outcome"],
+      "properties": {
+        "taskId": {"type": "string", "minLength": 16, "maxLength": 64},
+        "capability": {"type": "string", "maxLength": 64},
+        "outcome": {
+          "type": "string",
+          "enum": ["succeeded", "failed", "cancelled", "denied", "denied_by_timeout"]
+        },
+        "failureReason": {"type": "string", "maxLength": 64},
+        "resultHash": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+      }
+    }
+  }
+}

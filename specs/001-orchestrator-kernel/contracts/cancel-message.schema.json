@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-plan-harness.local/contracts/cancel-message.schema.json",
+  "title": "CancelMessage",
+  "description": "User -> Kernel cancel request. FR-013 / FR-014 / FR-015.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "traceId", "userId", "receivedAt"],
+  "properties": {
+    "kind": {"const": "cancel_request"},
+    "traceId": {"type": "string", "minLength": 16, "maxLength": 64},
+    "userId": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "MUST match Trace.userId, else rejected like approval impersonation."
+    },
+    "receivedAt": {"type": "string", "format": "date-time"}
+  }
+}

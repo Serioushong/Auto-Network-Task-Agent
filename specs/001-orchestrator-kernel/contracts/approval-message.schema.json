@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-plan-harness.local/contracts/approval-message.schema.json",
+  "title": "ApprovalMessage",
+  "description": "HIGH_RISK approval flow. FR-010 / FR-011 / FR-012.",
+  "oneOf": [
+    {"$ref": "#/$defs/ApprovalRequest"},
+    {"$ref": "#/$defs/ApprovalResponse"}
+  ],
+  "$defs": {
+    "ApprovalRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "traceId", "taskId", "capability", "riskLevel", "summary", "expiresAt"],
+      "properties": {
+        "kind": {"const": "approval_request"},
+        "traceId": {"type": "string", "minLength": 16, "maxLength": 64},
+        "taskId": {"type": "string", "minLength": 16, "maxLength": 64},
+        "capability": {"type": "string", "maxLength": 64},
+        "riskLevel": {"const": "HIGH_RISK"},
+        "summary": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Human-readable task summary (already redacted per FR-020)."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Default = now + 10 min (FR-011). Overridable by deployment config."
+        }
+      },
+      "description": "Kernel -> User via sourceChannel."
+    },
+    "ApprovalResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "traceId", "decision", "userId", "receivedAt"],
+      "properties": {
+        "kind": {"const": "approval_response"},
+        "traceId": {"type": "string", "minLength": 16, "maxLength": 64},
+        "decision": {"type": "string", "enum": ["approve", "deny"]},
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "MUST match Trace.userId, else audit 'approval_impersonation_rejected' and ignore."
+        },
+        "receivedAt": {"type": "string", "format": "date-time"}
+      },
+      "description": "User -> Kernel via sourceChannel."
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec-plan-harness.local/contracts/entry-event.schema.json",
+  "title": "EntryEvent",
+  "description": "External channel delivery to the kernel. FR-001 / FR-002 / FR-031.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "userId", "text", "sourceChannel", "receivedAt"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 64,
+      "description": "ULID or UUIDv4. Part of idempotency key (userId, eventId)."
+    },
+    "userId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Channel-provided identifier (OS username, openId, etc.). Idempotency key."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384,
+      "description": "Natural language command. FR-031: UTF-8 byte length <= 16 KB. Oversize rejected via `event_rejected_too_large` before any Task creation."
+    },
+    "sourceChannel": {
+      "type": "string",
+      "enum": ["cli", "http", "feishu_stub"],
+      "description": "Origin channel; ResultSummary MUST be delivered back via the same channel (FR-029)."
+    },
+    "receivedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 UTC timestamp with millisecond precision."
+    },
+    "meta": {
+      "type": "object",
+      "description": "Channel-specific passthrough. Redacted per FR-020 before audit write.",
+      "additionalProperties": true
+    }
+  }
+}
