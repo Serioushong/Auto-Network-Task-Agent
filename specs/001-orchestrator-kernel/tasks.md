@@ -21,14 +21,35 @@
 
 **Purpose**: Python 工程初始化、依赖、测试骨架。
 
-- [ ] T001 Create `pyproject.toml` at repo root with `[project]` metadata, `requires-python = ">=3.11"`, and runtime deps (`pydantic>=2.7`, `anyio>=4`, `structlog>=24`, `typer>=0.12`, `psutil>=5.9`, `jsonschema>=4.21`, `ulid-py>=1.1`) + dev deps (`pytest>=8`, `pytest-asyncio>=0.23`, `hypothesis>=6`, `ruff>=0.4`, `mypy>=1.10`). Register console script `orchestrator-kernel = "orchestrator_kernel.cli_main:app"`.
-- [ ] T002 Scaffold `src/orchestrator_kernel/` package tree per `plan.md` §Project Structure. Create `__init__.py` in each subpackage (`contracts/`, `entrypoints/`, `kernel/`, `worker_supervisor/`, `audit/`, `notifier/`, `llm/`). Create `src/workers_stub/` with `__init__.py`.
-- [ ] T003 [P] Scaffold `tests/` tree: `tests/contract/`, `tests/integration/`, `tests/unit/`, each with `__init__.py` and a root `conftest.py` that yields a `tmp_audit_dir` fixture (uses `tmp_path`).
-- [ ] T004 [P] Configure quality tooling in `pyproject.toml`: `[tool.ruff]` (select E,F,I,W,UP,B; line-length 100); `[tool.mypy]` (strict = true; files = src); `[tool.pytest.ini_options]` (asyncio_mode = "auto"; addopts = "-ra"); `[tool.hypothesis]` (deadline = 2000).
-- [ ] T005 [P] Extend `.gitignore` with `var/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `dist/`, `*.egg-info/`.
-- [ ] T006 Run `uv sync` and confirm `pytest -q` executes (empty suite passes). Record command in `specs/001-orchestrator-kernel/validation.md` as first evidence line.
+- [x] T001 Create `pyproject.toml` at repo root with `[project]` metadata, `requires-python = ">=3.11"`, and runtime deps (`pydantic>=2.7`, `anyio>=4`, `structlog>=24`, `typer>=0.12`, `psutil>=5.9`, `jsonschema>=4.21`, `ulid-py>=1.1`) + dev deps (`pytest>=8`, `pytest-asyncio>=0.23`, `hypothesis>=6`, `ruff>=0.4`, `mypy>=1.10`). Register console script `orchestrator-kernel = "orchestrator_kernel.cli_main:app"`. *(dry-run 2026-04-21: hatchling 后端；dev deps 迁移到 PEP 735 `[dependency-groups]`；加 `pydantic-settings>=2.2`；落 `cli_main.py` typer 占位。)*
+- [x] T002 Scaffold `src/orchestrator_kernel/` package tree per `plan.md` §Project Structure. Create `__init__.py` in each subpackage (`contracts/`, `entrypoints/`, `kernel/`, `worker_supervisor/`, `audit/`, `notifier/`, `llm/`). Create `src/workers_stub/` with `__init__.py`. *(dry-run 2026-04-21: 9 个 `__init__.py` + `cli_main.py` 占位。)*
+- [x] T003 [P] Scaffold `tests/` tree: `tests/contract/`, `tests/integration/`, `tests/unit/`, each with `__init__.py` and a root `conftest.py` that yields a `tmp_audit_dir` fixture (uses `tmp_path`). *(dry-run 2026-04-21 完成。)*
+- [x] T004 [P] Configure quality tooling in `pyproject.toml`: `[tool.ruff]` (select E,F,I,W,UP,B; line-length 100); `[tool.mypy]` (strict = true; files = src); `[tool.pytest.ini_options]` (asyncio_mode = "auto"; addopts = "-ra"); `[tool.hypothesis]` (deadline = 2000). *(dry-run 2026-04-21 完成，额外追加 `pydantic.mypy` plugin + `pythonpath=["src"]` 以便测试导入。)*
+- [x] T005 [P] Extend `.gitignore` with `var/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `dist/`, `*.egg-info/`. *(dry-run 2026-04-21 完成；`*.egg-info/` 原已存在，新增 `var/` / 工具缓存 / `dist/` / `build/` / `.hypothesis/`。)*
+- [x] T006 Run `uv sync` and confirm `pytest -q` executes (empty suite passes). Record command in `specs/001-orchestrator-kernel/validation.md` as first evidence line. *(dry-run 2026-04-21: `uv sync` 安装 39 包；`uv run pytest -q` → **3 passed in 0.14s**（scaffold smoke）；validation.md Evidence #1 已落盘。偏离：为避免 pytest exit-code 5（no-tests-collected），补了 `tests/test_scaffold.py` 3 条烟雾测试，不影响后续 RED 测试任务。)*
 
-**Checkpoint**: `uv run pytest -q` 绿灯（0 条测试，0 错误）。
+**Checkpoint**: `uv run pytest -q` 绿灯（实际 3 条 scaffold smoke，见 T006 偏离说明）。
+
+---
+
+## Phase 1.5: Setup Follow-up (post dry-run self-review, 2026-04-21)
+
+**Purpose**: dry-run T001–T006 完成后做的"自审"挖出来的 5 条 MEDIUM finding。
+本阶段全部 [P]，**不阻塞** Phase 2 启动；可以与 T007–T015 RED 任务并行落地，
+也可以挪到 Polish 阶段处理。每条都对应 review 报告中的编号（H1/H2/M1–M5）。
+
+- [x] T006a [P] **(H1)** Fix ruff E501 baseline reds：拆 `src/orchestrator_kernel/kernel/__init__.py` 单行 docstring → 多行；`src/orchestrator_kernel/cli_main.py` 的 `help=` 提取为常量 `_HELP`。验收：`uv run ruff check src tests` 0 errors。*(已完成 2026-04-21 fix-and-commit 批次)*
+- [x] T006b [P] **(H2)** 去除 `pyproject.toml` 中 `[project.optional-dependencies].dev` 与 `[dependency-groups].dev` 的双份重复；保留 PEP 735 `[dependency-groups]` 作唯一 dev deps 来源；上方加注释说明 pip 用户的 fallback 命令。验收：grep `optional-dependencies` 返回 0 行。*(已完成 2026-04-21 fix-and-commit 批次)*
+- [x] T006c [P] **(M5)** 在 `tests/test_scaffold.py` 文件顶部加 `⚠️ TRANSITIONAL FILE` 注释，说明它是 Phase 1 闸门，T007 落盘后 SHOULD remove；列出 4 条 trivially-asserted invariants 与 lifecycle。验收：人工 review 通过。*(已完成 2026-04-21 fix-and-commit 批次)*
+- [ ] T006d [P] **(M1)** 重新评估 `src/workers_stub/` 的 wheel 打包策略：
+  - 选项 A：保留 `src/workers_stub/`，在 `[tool.hatch.build.targets.wheel]` 用 `exclude` 把它从 wheel 剔除（仅作开发期 stub）；
+  - 选项 B：把它挪到 `tests/fixtures/workers/`，同步更新 plan.md §Project Structure 与 tasks.md T039/T057/T063/T075 的路径引用；
+  - 决策记录到 `research.md` 末尾追加 "Decision 11: workers_stub layout"。验收：`uv build` 后 wheel 内不应含 `crash_worker.py`。
+- [ ] T006e [P] **(M2)** pytest 包结构合规性回查：删除 `tests/{contract,integration,unit}/__init__.py` 与 `tests/__init__.py`（pytest 官方推荐 namespace 包），跑一次 `uv run pytest -q` 确认收集仍然成功；如果保留 `__init__.py`，在 `tests/conftest.py` 顶部加注释说明"已知风险：同名 test_*.py 跨子目录会冲突"。
+- [ ] T006f [P] **(M3)** 在仓库根新增 `.gitattributes`：`* text=auto eol=lf`、`*.py text eol=lf`、`*.toml text eol=lf`、`*.md text eol=lf`、`*.json text eol=lf`、`*.ps1 text eol=crlf`；首次 commit 后跑 `git add --renormalize .` 把现有 CRLF 文件重新规范化到 LF。验收：跨 OS clone 不再触发 CRLF warning。
+- [ ] T006g [P] **(M4)** 更新 repo 根 `README.md`：在 "Phases" 之后新增 "Quickstart for developers" 一节，包含 `uv sync` / `uv run pytest -q` / `uv run ruff check src tests` / `uv run mypy src` 4 条命令，并指向 `specs/001-orchestrator-kernel/validation.md` Evidence #1。验收：人工 review。
+
+**Checkpoint**: 全部 follow-up 落盘后（或显式延期到 Polish 阶段），Phase 1 Setup 才算"硬性收尾"；当前 H1/H2/M5 已修，M1–M4 状态留给后续推进。
 
 ---
 
@@ -275,9 +296,11 @@
 ### Phase 依赖
 
 ```text
-Phase 1 (Setup)
-   │
-   ▼
+Phase 1 (Setup)  ──┐
+                   ▼
+Phase 1.5 (Setup Follow-up, dry-run review fixes) — 不阻塞，可与 Phase 2 并行
+                   │
+                   ▼
 Phase 2 (Foundational) ——— contracts + infra，一切 user story 的门槛
    │
    ├─▶ Phase 3 US1 (MVP) ── 独立可测
@@ -387,5 +410,5 @@ Task: "T015 result-summary contract test in tests/contract/test_result_summary.p
 - 本 tasks.md 为 `/speckit-tasks` 阶段产出；实现阶段启动 MUST 严格走 **红 → 绿 → 重构** 节奏。
 - 每个已完成任务 SHOULD 单独（或按小簇）commit 到 `hjx`，commit message 描述 "变更点 / 影响范围 / 测试结论"，对齐 Constitution Article VIII 要求。
 - **禁止**在 `/speckit-analyze` 通过前合并 `main`；禁止对 `main` force-push。
-- 总任务数：**104 条**（Setup 6 + Foundational 29 + US1 12 + US2 7 + US3 7 + US4 8 + US5 9 + US6 9 + US7 7 + Polish 10）。
-- `[P]` 任务数：**61 条**（高并行度，得益于契约先行与 user story 独立性）。
+- 总任务数：**111 条**（Setup 6 + **Setup Follow-up 7** + Foundational 29 + US1 12 + US2 7 + US3 7 + US4 8 + US5 9 + US6 9 + US7 7 + Polish 10）。其中 Setup Follow-up 的 7 条（T006a–T006g）由 dry-run 自审产生，3 条 H1/H2/M5 已修，4 条 M1–M4 待推进。
+- `[P]` 任务数：**68 条**（+7 来自 Phase 1.5 全 [P]）。

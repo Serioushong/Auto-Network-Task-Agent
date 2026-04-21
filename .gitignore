@@ -17,6 +17,17 @@ venv/
 .env
 .env.*
 
+# ---- Python tooling caches / build artifacts ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+dist/
+build/
+
+# ---- Kernel runtime state (audit logs, kernel.toml overrides) ----
+var/
+
 # ---- Node ----
 node_modules/
 npm-debug.log*
