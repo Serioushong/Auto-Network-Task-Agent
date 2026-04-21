@@ -1,0 +1,41 @@
+# ---- OS ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Editors ----
+.vscode/
+.idea/
+*.swp
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+
+# ---- Node ----
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# ---- Cursor / AI agent artifacts (potential credentials) ----
+# Keep skills/rules committed, ignore runtime state/caches/credentials
+.cursor/cache/
+.cursor/logs/
+.cursor/state/
+.cursor/credentials/
+.cursor/*.log
+
+# ---- Spec Kit runtime ----
+.specify/cache/
+.specify/tmp/
+
+# ---- Local secrets ----
+*.secret
+*.key
+*.pem
