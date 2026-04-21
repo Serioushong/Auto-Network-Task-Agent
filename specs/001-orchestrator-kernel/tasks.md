@@ -1,4 +1,4 @@
-# Tasks: Orchestrator Kernel MVP (001-orchestrator-kernel)
+﻿# Tasks: Orchestrator Kernel MVP (001-orchestrator-kernel)
 
 **Branch**: `hjx` (per Constitution Article VIII)
 **Created**: 2026-04-21
@@ -58,43 +58,48 @@
 
 ### 2A · Contract tests (RED — all [P], one file each)
 
-- [ ] T007 [P] Write failing contract test in `tests/contract/test_entry_event.py`: 正例合规；反例覆盖缺字段、`text > 16_384 bytes`、非法 `sourceChannel`、`eventId` 长度越界。引用 `specs/001-orchestrator-kernel/contracts/entry-event.schema.json`。
-- [ ] T008 [P] Write failing contract test in `tests/contract/test_task.py`: root_intent vs leaf_action 分支；leaf 缺 `capability`/`riskLevel`/`budget` 应拒；state/outcome 交叉一致性；`resultHash` pattern。
-- [ ] T009 [P] Write failing contract test in `tests/contract/test_budget.py`: 三维边界（min=1、硬顶 1_800_000 / 200 / 500_000）；越界应拒。
-- [ ] T010 [P] Write failing contract test in `tests/contract/test_worker_registration.py`: capability name pattern、riskLevel 枚举、`resourceLimits` 范围；capability 超硬顶 budget 注册应拒。
-- [ ] T011 [P] Write failing contract test in `tests/contract/test_worker_protocol.py`: 覆盖全部 7 种帧（register/dispatch/started/result/heartbeat/abort/shutdown）的正反例；discriminator `kind` 错误应拒。
-- [ ] T012 [P] Write failing contract test in `tests/contract/test_approval.py`: request 与 response 两支；userId 长度、decision 枚举、expiresAt 必填。
-- [ ] T013 [P] Write failing contract test in `tests/contract/test_cancel.py`: 必需字段、userId 越界拒绝。
-- [ ] T014 [P] Write failing contract test in `tests/contract/test_audit_event.py`: 全部 36 种 `eventType` 枚举断言；`actor` pattern；`input_hash`/`output_hash` pattern；nullable `traceId` 路径。
-- [ ] T015 [P] Write failing contract test in `tests/contract/test_result_summary.py`: `traceOutcome` 枚举、`leafResults` items schema、`deliveryAttempt` ≤ 3；`kernel_restarted` 时 `message` 必须含重投提示。
+- [x] T007 [P] Write failing contract test in `tests/contract/test_entry_event.py`: 正例合规；反例覆盖缺字段、`text > 16_384 bytes`、非法 `sourceChannel`、`eventId` 长度越界。引用 `specs/001-orchestrator-kernel/contracts/entry-event.schema.json`。
+- [x] T008 [P] Write failing contract test in `tests/contract/test_task.py`: root_intent vs leaf_action 分支；leaf 缺 `capability`/`riskLevel`/`budget` 应拒；state/outcome 交叉一致性；`resultHash` pattern。
+- [x] T009 [P] Write failing contract test in `tests/contract/test_budget.py`: 三维边界（min=1、硬顶 1_800_000 / 200 / 500_000）；越界应拒。
+- [x] T010 [P] Write failing contract test in `tests/contract/test_worker_registration.py`: capability name pattern、riskLevel 枚举、`resourceLimits` 范围；capability 超硬顶 budget 注册应拒。
+- [x] T011 [P] Write failing contract test in `tests/contract/test_worker_protocol.py`: 覆盖全部 7 种帧（register/dispatch/started/result/heartbeat/abort/shutdown）的正反例；discriminator `kind` 错误应拒。
+- [x] T012 [P] Write failing contract test in `tests/contract/test_approval.py`: request 与 response 两支；userId 长度、decision 枚举、expiresAt 必填。
+- [x] T013 [P] Write failing contract test in `tests/contract/test_cancel.py`: 必需字段、userId 越界拒绝。
+- [x] T014 [P] Write failing contract test in `tests/contract/test_audit_event.py`: 全部 36 种 `eventType` 枚举断言；`actor` pattern；`input_hash`/`output_hash` pattern；nullable `traceId` 路径。
+- [x] T015 [P] Write failing contract test in `tests/contract/test_result_summary.py`: `traceOutcome` 枚举、`leafResults` items schema、`deliveryAttempt` ≤ 3；`kernel_restarted` 时 `message` 必须含重投提示。
 
 ### 2B · Pydantic mirrors (GREEN — all [P], one file each)
 
-- [ ] T016 [P] Implement `EntryEvent` in `src/orchestrator_kernel/contracts/entry_event.py` (pydantic v2；`model_config = ConfigDict(extra="forbid")`；`text` 长度校验器按 UTF-8 字节数计算)。
-- [ ] T017 [P] Implement `Task` / `TaskState` / `TaskOutcome` / `FailureReason` enums + model in `src/orchestrator_kernel/contracts/task.py`；嵌套 leaf-specific 校验（pydantic `model_validator(mode="after")`）。
-- [ ] T018 [P] Implement `Budget` + `DEFAULT_BUDGET` + `SYSTEM_HARD_CAP` constants in `src/orchestrator_kernel/contracts/budget.py`.
-- [ ] T019 [P] Implement `Capability`, `ResourceLimits`, `WorkerRegistration` in `src/orchestrator_kernel/contracts/worker.py`；在 model_validator 中断言 `capability.budget` 不越硬顶。
-- [ ] T020 [P] Implement discriminated union `WorkerFrame` (Register/Dispatch/Started/Result/Heartbeat/Abort/Shutdown) in `src/orchestrator_kernel/contracts/worker_protocol.py` 使用 pydantic `Discriminator("kind")`.
-- [ ] T021 [P] Implement `ApprovalRequest`/`ApprovalResponse` + `ApprovalMessage` union in `src/orchestrator_kernel/contracts/approval.py`.
-- [ ] T022 [P] Implement `CancelMessage` in `src/orchestrator_kernel/contracts/cancel.py`.
-- [ ] T023 [P] Implement `AuditEvent` + `EventType` Literal union in `src/orchestrator_kernel/contracts/audit.py`.
-- [ ] T024 [P] Implement `ResultSummary` + `LeafResult` in `src/orchestrator_kernel/contracts/result_summary.py`.
-- [ ] T025 Run `pytest tests/contract/ -q`；全部变绿；round-trip（pydantic → `model_json_schema()` → 与 `contracts/*.schema.json` 断言一致）作为 contract test 的内嵌子用例。
+- [x] T016 [P] Implement `EntryEvent` in `src/orchestrator_kernel/contracts/entry_event.py` (pydantic v2；`model_config = ConfigDict(extra="forbid")`；`text` 长度校验器按 UTF-8 字节数计算)。
+- [x] T017 [P] Implement `Task` / `TaskState` / `TaskOutcome` / `FailureReason` enums + model in `src/orchestrator_kernel/contracts/task.py`；嵌套 leaf-specific 校验（pydantic `model_validator(mode="after")`）。
+- [x] T018 [P] Implement `Budget` + `DEFAULT_BUDGET` + `SYSTEM_HARD_CAP` constants in `src/orchestrator_kernel/contracts/budget.py`.
+- [x] T019 [P] Implement `Capability`, `ResourceLimits`, `WorkerRegistration` in `src/orchestrator_kernel/contracts/worker.py`；在 model_validator 中断言 `capability.budget` 不越硬顶。
+- [x] T020 [P] Implement discriminated union `WorkerFrame` (Register/Dispatch/Started/Result/Heartbeat/Abort/Shutdown) in `src/orchestrator_kernel/contracts/worker_protocol.py` 使用 pydantic `Discriminator("kind")`.
+- [x] T021 [P] Implement `ApprovalRequest`/`ApprovalResponse` + `ApprovalMessage` union in `src/orchestrator_kernel/contracts/approval.py`.
+- [x] T022 [P] Implement `CancelMessage` in `src/orchestrator_kernel/contracts/cancel.py`.
+- [x] T023 [P] Implement `AuditEvent` + `EventType` Literal union in `src/orchestrator_kernel/contracts/audit.py`.
+- [x] T024 [P] Implement `ResultSummary` + `LeafResult` in `src/orchestrator_kernel/contracts/result_summary.py`.
+- [x] T025 Run `pytest tests/contract/ -q`；全部变绿；round-trip（pydantic → `model_json_schema()` → 与 `contracts/*.schema.json` 断言一致）作为 contract test 的内嵌子用例。
 
 ### 2C · Shared infra
 
-- [ ] T026 Implement `src/orchestrator_kernel/config.py`: 使用 pydantic-settings 加载 `var/kernel.toml`；暴露 `system_hard_cap`、`approval_timeout_default_ms=600_000`、`payload_max_bytes_default=16_384`、`rate_limit_defaults`；启动时对任何部署配置越界值 raise。
-- [ ] T027 [P] Implement hashing + redact helpers in `src/orchestrator_kernel/audit/hasher.py` (SHA-256 截前 16 bytes hex) 与 `src/orchestrator_kernel/audit/redact.py` (structlog processor；按字段名 allowlist + 值长度阈值双策略)。
-- [ ] T028 [P] Write failing unit test `tests/unit/test_state_machine.py`: Task.state 单向转换表；`succeeded/failed/cancelled/denied/denied_by_timeout` 为终态（任何出边应 raise）；HIGH_RISK 必经 `pending_approval`。
-- [ ] T029 Implement Task state machine in `src/orchestrator_kernel/kernel/state_machine.py`：一个 `transition(task, to_state, *, reason=None) -> Task` 纯函数，内含 INV-2 / INV-3 断言。
-- [ ] T030 [P] Write failing unit test `tests/unit/test_audit_writer.py`: JSONL append; UTC 日切 rotation；`disk_write_failed` 事件在磁盘不可写时落盘并切入"拒绝新入口"（通过依赖注入模拟磁盘故障）。
-- [ ] T031 Implement audit writer in `src/orchestrator_kernel/audit/writer.py`：结合 structlog JSONL processor、`O_APPEND` 写入、每天 UTC 0 点 rotate；disk-full handling 通过 `IOError` 捕获 + 切状态 + 自审计；暴露 `AuditWriter.write(AuditEvent) -> None` 与 `AuditWriter.healthy: bool`。
-- [ ] T032 [P] Write failing unit test `tests/unit/test_payload_size.py`: 正好 16_384 bytes 通过；16_385 bytes 拒；`rejected(reason=payload_too_large, limit=16KB, actual=<bytes>)` 审计事件结构正确。
-- [ ] T033 Implement payload-size guard in `src/orchestrator_kernel/kernel/validators.py`：`assert_payload_size(event)` 先于 schema 校验运行（FR-031）。
-- [ ] T034 [P] Write failing unit test `tests/unit/test_rate_limit.py`: 覆盖 4 个维度（`global_rps=50`、`user_rpm=120`、`user_concurrent=10`、`user_highrisk_concurrent=1`）；`rejected(reason=rate_limited, dimension=…)` 事件结构。
-- [ ] T035 Implement rate limiter in `src/orchestrator_kernel/kernel/rate_limit.py`：token bucket (全局 rps) + sliding window (per-user rpm) + counter (per-user concurrent)；使用 `anyio.Lock` 保护。
+- [x] T026 Implement `src/orchestrator_kernel/config.py`: 使用 pydantic-settings 加载 `var/kernel.toml`；暴露 `system_hard_cap`、`approval_timeout_default_ms=600_000`、`payload_max_bytes_default=16_384`、`rate_limit_defaults`；启动时对任何部署配置越界值 raise。
+- [x] T027 [P] Implement hashing + redact helpers in `src/orchestrator_kernel/audit/hasher.py` (SHA-256 截前 16 bytes hex) 与 `src/orchestrator_kernel/audit/redact.py` (structlog processor；按字段名 allowlist + 值长度阈值双策略)。
+- [x] T028 [P] Write failing unit test `tests/unit/test_state_machine.py`: Task.state 单向转换表；`succeeded/failed/cancelled/denied/denied_by_timeout` 为终态（任何出边应 raise）；HIGH_RISK 必经 `pending_approval`。
+- [x] T029 Implement Task state machine in `src/orchestrator_kernel/kernel/state_machine.py`：一个 `transition(task, to_state, *, reason=None) -> Task` 纯函数，内含 INV-2 / INV-3 断言。
+- [x] T030 [P] Write failing unit test `tests/unit/test_audit_writer.py`: JSONL append; UTC 日切 rotation；`disk_write_failed` 事件在磁盘不可写时落盘并切入"拒绝新入口"（通过依赖注入模拟磁盘故障）。
+- [x] T031 Implement audit writer in `src/orchestrator_kernel/audit/writer.py`：结合 structlog JSONL processor、`O_APPEND` 写入、每天 UTC 0 点 rotate；disk-full handling 通过 `IOError` 捕获 + 切状态 + 自审计；暴露 `AuditWriter.write(AuditEvent) -> None` 与 `AuditWriter.healthy: bool`。
+- [x] T032 [P] Write failing unit test `tests/unit/test_payload_size.py`: 正好 16_384 bytes 通过；16_385 bytes 拒；`rejected(reason=payload_too_large, limit=16KB, actual=<bytes>)` 审计事件结构正确。
+- [x] T033 Implement payload-size guard in `src/orchestrator_kernel/kernel/validators.py`：`assert_payload_size(event)` 先于 schema 校验运行（FR-031）。
+- [x] T034 [P] Write failing unit test `tests/unit/test_rate_limit.py`: 覆盖 4 个维度（`global_rps=50`、`user_rpm=120`、`user_concurrent=10`、`user_highrisk_concurrent=1`）；`rejected(reason=rate_limited, dimension=…)` 事件结构。
+- [x] T035 Implement rate limiter in `src/orchestrator_kernel/kernel/rate_limit.py`：token bucket (全局 rps) + sliding window (per-user rpm) + counter (per-user concurrent)；使用 `anyio.Lock` 保护。
 
-**Checkpoint**: `pytest tests/contract/ tests/unit/ -q` 全绿；契约与基础设施就位，user stories 可并行启动。
+**Checkpoint**: ✅ Phase 2 **全部 29 条任务（T007~T035）完成 2026-04-21**。
+- 2A-RED (commit 26a0732)：9 份 failing 契约测试 + tests/contract/_common.py helper。
+- 2B-GREEN (commit a7e3705)：9 份 pydantic 镜像 + T025 round-trip。tests/contract/__init__.py 恢复（相对导入 helper 需真实 package；tests/unit, tests/integration 仍 namespace）。
+- 2C-infra (commit 本批)：T026 config.py（pydantic-settings + TOML optional）；T027 hasher.py + redact.py；T028~T029 state_machine.py（INV-2 终态 / INV-3 HIGH_RISK 强制走 pending_approval）；T030~T031 AuditWriter（JSONL append + UTC 日切 + 磁盘失败降级 healthy=False）；T032~T033 validators.py（payload ≤ 16 KB UTF-8 bytes，先于 schema 跑）；T034~T035 RateLimiter（token bucket + sliding window + 4 维 counter）。
+- 验证：`uv run pytest -q` **406 passed**（契约 345 + 契约 round-trip 3 + state_machine 29 + audit_writer 6 + payload_size 8 + rate_limit 12 + scaffold 3）；`ruff` 全绿；`mypy --strict` 全绿，26 source files。
+- 契约与基础设施就位，user stories (Phase 3~9) 可并行启动。
 
 ---
 
