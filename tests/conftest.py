@@ -13,11 +13,12 @@ Layout note (see tasks.md T006e / T006e+ / review finding M2):
   collection conflicts.
 
   Exception: `tests/contract/` ships a shared helper module `_common.py`
-  consumed via `from ._common import ...`. Relative imports require a real
-  package, so that subdirectory keeps its `__init__.py`. `tests/unit/` and
-  `tests/integration/` remain namespace directories with no `__init__.py`.
-  If you ever need to turn the other subdirs into importable packages, add
-  `__init__.py` back AND rename overlapping test modules.
+  and `tests/integration/` ships `_harness.py`, both consumed via
+  `from ._common import ...` / `from ._harness import ...`. Relative
+  imports require a real package, so those two subdirectories keep their
+  `__init__.py`. `tests/unit/` remains a namespace directory with no
+  `__init__.py`. If you turn `tests/unit/` into a package, rename any
+  overlapping test modules (currently none).
 """
 
 from __future__ import annotations

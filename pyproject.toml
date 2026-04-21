@@ -74,6 +74,9 @@ asyncio_mode = "auto"
 addopts = "-ra"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "integration: end-to-end tests that spawn worker subprocesses or wire up the full kernel (Phase 3+).",
+]
 
 [tool.hypothesis]
 deadline = 2000

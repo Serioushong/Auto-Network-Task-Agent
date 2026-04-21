@@ -111,9 +111,10 @@
 
 ### Tests for US1 (RED)
 
-- [ ] T036 [P] [US1] Write failing integration test `tests/integration/test_p1_basic_loop.py`：启动内核 fixture + `echo-worker` stub；通过 CLI 接口提交 `{text: "echo hello"}`；断言 (a) 返回 `traceOutcome=all_succeeded`、(b) 审计链完整（`event_received → trace_created → task_created → task_dispatched → task_started → task_succeeded → result_summary_prepared → result_summary_delivered`）、(c) 端到端耗时 ≤ 3 s。
-- [ ] T037 [P] [US1] Write failing integration test `tests/integration/test_p1_no_worker.py`：提交需要 `desktop.click` capability 的事件，无 Worker 声明；断言 `failed(reason=no_capable_worker)` 闭环。
-- [ ] T038 [P] [US1] Write failing contract-level integration test `tests/integration/test_worker_stdio_roundtrip.py`：内核 ↔ Worker stdio 一轮 dispatch/started/result；字节层精确匹配 JSON Schema。
+- [x] T036 [P] [US1] Write failing integration test `tests/integration/test_p1_basic_loop.py` — 已完成 3A-RED 批次。4 条 test：端到端 all_succeeded / 审计链完整 / SC-002 p95 ≤ 3s / trace+event IDs。RED 信号：`assemble_kernel` ImportError（T045 兑现）。
+- [x] T037 [P] [US1] Write failing integration test `tests/integration/test_p1_no_worker.py` — 已完成 3A-RED 批次。3 条 test：desktop.click 无 worker / task_failed 审计 + failureReason=no_capable_worker / 零 worker 注册。RED 信号同 T036。
+- [x] T038 [P] [US1] Write failing contract-level integration test `tests/integration/test_worker_stdio_roundtrip.py` — 已完成 3A-RED 批次。3 条 test：register 帧字节干净 / dispatch-started-result 时序 / 非法 JSON 不崩父进程。RED 信号：`src/workers_stub/echo_worker.py` 不存在（T043 兑现）。
+- **3A-RED 基础设施**：新增 `tests/integration/__init__.py`（声明 package）+ `tests/integration/_harness.py`（KernelHarnessProtocol / TraceResult / WorkerSpec dataclass）+ `tests/integration/conftest.py`（`kernel_harness` async fixture + `echo_worker_script` + `audit_events_factory`）；`pyproject.toml` `[tool.pytest.ini_options].markers` 注册 `integration` 标签；`tests/conftest.py` Layout note 同步说明 integration 也是真实 package。
 
 ### Implementation for US1 (GREEN)
 
