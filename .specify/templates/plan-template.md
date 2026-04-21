@@ -30,8 +30,21 @@
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+*Aligned with `.specify/memory/constitution.md` v1.0.0.*
 
-[Gates determined based on constitution file]
+| # | Gate | Pass criteria | Status |
+|---|------|---------------|--------|
+| I   | Spec-Driven Development          | 本功能已走完 specify→clarify→plan→tasks→analyze 工序 | ☐ PASS / ☐ FAIL |
+| II  | Least Privilege (Capability Matrix) | 本 plan 列出了全部 capability；HIGH_RISK 动作已独立标注 | ☐ PASS / ☐ FAIL |
+| III | Human-in-the-Loop Gate           | HIGH_RISK 动作均有确认流程；主 Agent 支持一键取消 | ☐ PASS / ☐ FAIL / ☐ N/A |
+| IV  | Observability & Auditability     | 设计了 traceId/taskId 结构化日志与敏感字段脱敏方案 | ☐ PASS / ☐ FAIL |
+| V   | Sandboxed Execution              | 子 Agent 有进程/容器隔离 + 资源上限 + 软中止 | ☐ PASS / ☐ FAIL / ☐ N/A |
+| VI  | Idempotent & Replayable          | 入口事件与任务具备幂等键；支持只读重放 | ☐ PASS / ☐ FAIL |
+| VII | Contract-First                   | 跨 Agent/外部边界的消息 Schema 已先行定义 | ☐ PASS / ☐ FAIL |
+| VIII| Branch-Based Dual-Gate Release   | 开发分支为 `hjx`；合并 `main` 的四项条件已规划 | ☐ PASS / ☐ FAIL |
+
+> 任何 FAIL 必须在 `## Complexity Tracking` 记录豁免理由或改写 plan。
+> 任何 N/A 必须在同节说明"本功能为何不涉及该原则"。
 
 ## Project Structure
 
