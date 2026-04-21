@@ -2,23 +2,94 @@
 alwaysApply: true
 ---
 
-<!-- SPECKIT START -->
-Active feature: **001-orchestrator-kernel** (主 Agent 编排内核 MVP)
-Active branch per Constitution Article VIII: `hjx`
+<!-- SPECKIT START (auto-loaded every chat; keep terse) -->
 
-Key project artifacts (read these before making changes):
-- `.specify/memory/constitution.md` — project constitution v1.0.0 (8 principles, non-negotiable)
-- `specs/001-orchestrator-kernel/spec.md` — feature specification (31 FR, 11 SC, clarify done)
-- `specs/001-orchestrator-kernel/plan.md` — implementation plan (Python 3.11, asyncio, subprocess stdio)
-- `specs/001-orchestrator-kernel/research.md` — tech decisions & rationale (R-01..R-10)
-- `specs/001-orchestrator-kernel/data-model.md` — entities, state machines, 8 invariants
-- `specs/001-orchestrator-kernel/contracts/` — JSON Schema Draft 2020-12 for all boundary messages
+# Spec-Plan-Harness 项目常驻规则
 
-Non-negotiable rules derived from constitution:
-- All development commits go to `hjx`; `main` is protected (Article VIII)
-- No code before `/speckit-tasks` & `/speckit-analyze` complete (Article I)
-- All cross-boundary messages MUST have pydantic + JSON Schema contract (Article VII)
-- HIGH_RISK capabilities MUST pass through `pending_approval` gate (Article III)
-- All state changes MUST emit structured JSONL audit events with sensitive-field redaction (Article IV)
-- Worker isolation: subprocess + Windows Job Object + soft-abort (CTRL_BREAK_EVENT) → hard (Article V)
+**Active feature**: `001-orchestrator-kernel` (主 Agent 编排内核 MVP)
+**Active branch** (宪法 Article VIII): `hjx`；`main` 受保护。
+**Language**: 始终使用简体中文回复（用户规则）。
+
+## 接手必读（按此顺序）
+
+每次新 chat / 新任务，**先读再动**。进度真理之源是 Tier C 两份文件。
+
+### Tier A — 宪法层（不可越过）
+- `.specify/memory/constitution.md` — 8 条不可协商原则
+
+### Tier B — Spec Kit 全套（任何实现前必读）
+- `specs/001-orchestrator-kernel/spec.md` — 31 条 FR + 11 条 SC + 5 条 clarification + 6 个 User Story
+- `specs/001-orchestrator-kernel/plan.md` — 技术栈（Python 3.11+ / uv / anyio / pydantic v2 / structlog / Windows Job Object / Typer）
+- `specs/001-orchestrator-kernel/research.md` — R-01~R-11 决策（R-11 = workers_stub wheel 打包策略）
+- `specs/001-orchestrator-kernel/data-model.md` — 实体 + INV-1（幂等）/ INV-2（终态零出边）/ INV-3（HIGH_RISK 强制 pending_approval）
+- `specs/001-orchestrator-kernel/contracts/*.schema.json` — 9 份 JSON Schema Draft 2020-12（契约先行 FR-024）
+- `specs/001-orchestrator-kernel/quickstart.md` — §2~§6 每个 User Story 的独立测试脚本
+
+### Tier C — 当前进度 + 验收证据（每次接手必先看）
+- `specs/001-orchestrator-kernel/tasks.md` — **进度真理之源**；`[x]` 已完成，`[ ]` 待做；Phase Checkpoint 标记里程碑
+- `specs/001-orchestrator-kernel/validation.md` — 每 Phase 的可审计证据（Evidence #N，含命令、版本、UTC 时间戳、诊断披露）
+
+### Tier D — 实现状态（按需）
+- `pyproject.toml` — 依赖 + 工具链 + `[tool.pytest.ini_options]`
+- `src/orchestrator_kernel/**` — 当前代码（contracts / audit / kernel / config / cli_main）
+- `tests/{contract,unit,integration}/**` — 当前测试
+- `git log --oneline -5` on `hjx` — 知道最近 commit 链
+
+## 不可协商的硬规则（宪法派生）
+
+1. **双分支门禁（Article VIII）**：所有开发先进 `hjx`。`main` 仅接受 ① Spec Kit 全流程 + `/speckit-analyze` 通过、② TDD 单元 + 集成 + 契约全绿、③ 至少一次人工端到端验收演练、④ SemVer tag。不得直 push 或 force-push `main`。
+2. **契约先行（Article VII / FR-024）**：跨边界消息 **先** JSON Schema + Pydantic v2 再写实现。契约变更触发 spec MAJOR 版本变更。
+3. **HIGH_RISK 审批门（Article III / INV-3）**：`HIGH_RISK` 能力 **必须** 经 `pending_approval`；超时默认拒绝（`denied_by_timeout`）。
+4. **审计全链路（Article IV）**：每条状态变更 / 派发 / 结果 / 审批 / 取消 / 崩溃 **MUST** 落 JSONL 结构化审计；敏感字段脱敏；traceId 可完整回放；保留期 ≥ 30 天。
+5. **沙箱隔离（Article V / FR-016~FR-018）**：子 Agent 独立进程 + 资源上限（内存 / CPU / 墙钟 / 三维预算）；软中止（`CTRL_BREAK_EVENT` / `SIGTERM`）3s 内无响应升级硬终止（Article III 的 5s SLA）。
+6. **幂等（Article VI / FR-022 / INV-1）**：`(userId, eventId)` 重复投递 **MUST NOT** 产生新 Task 树；返回首次 traceId + 当前状态；审计打 `idempotent_replay=true`。
+7. **payload 硬顶（FR-031）**：`text` ≤ 16 KB UTF-8 bytes（非字符数），先于其他 schema 校验跑。
+8. **TDD 红-绿-重构**：先写 failing test → 再最小实现 → 再重构。失败原因必须来自"实现缺失"而非"测试本身有 bug"。
+
+## 质量基线命令（每次 commit 前必跑全绿）
+
+```
+uv run ruff check src tests        # 格式 + lint
+uv run mypy src                    # 静态类型（strict）
+uv run pytest -q                   # 全量测试
+```
+
+RED 批次下（故意未绿）允许 `uv run pytest -q --ignore=tests/integration`，但 commit message 必须披露"RED 阶段"。
+
+## Commit message 模板（Article VIII 强制）
+
+```
+<type>(001-orchestrator-kernel): <简短标题>
+
+更新说明（Phase X <批次名>）：
+- <变更点 1>
+- <变更点 2>
+
+质量门禁：
+- uv run ruff check src tests → ...
+- uv run mypy src → ...
+- uv run pytest -q → ...
+
+影响范围：<改了哪些文件 / 哪些 FR / 哪些 INV>
+后续门禁：<下一批次入口 + 预期门禁状态>
+```
+
+PowerShell 提示：`&&` 不支持；heredoc 走 `git commit -F <file>` 或临时 `.git-commit-msg.tmp`（已在 `.gitignore`）。
+
+## 进入新 Phase 的标准动作
+
+1. 读 `tasks.md` 定位下一个未打勾的 task block
+2. 读该 block 里 test / impl 指针提到的 schema 与代码文件
+3. 分批次走 RED → GREEN；每批次结束：
+   - 更新 `tasks.md` 把完成的 `[ ]` 改成 `[x]` + 批注"已完成 X 批次"
+   - 追加一条 `validation.md` Evidence #N（UTC 时间戳、命令、输出摘要、诊断披露）
+   - commit 到 `hjx`（按上面模板）
+
+## 上下文管理
+
+单次 chat 承载过多 Phase 会触发 token 预算撞墙。分批策略：
+- 每个 Phase 拆 ≤ 3 个 commit 批次；每批次一个独立 commit
+- Phase 切换时开新 chat，靠本规则 + `tasks.md` + `validation.md` 接手
+- 复杂 review / 审计类任务优先派 `explore` readonly 子 agent，附精确文件清单
+
 <!-- SPECKIT END -->
