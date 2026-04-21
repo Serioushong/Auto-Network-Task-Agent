@@ -50,3 +50,41 @@
   - `tasks.md` 新增 Phase 1.5（7 条 T006a–T006g），更新 Phase 依赖图与统计（104 → 111 条 / 61 → 68 [P]）。
 - **Conclusion**: ✅ Phase 1 Setup baseline 4 gate（ruff / mypy / pytest / no-duplicate-deps）全绿。M1–M4（workers_stub wheel 排除、tests `__init__` 合规、`.gitattributes`、README quickstart）作 Phase 1.5 follow-up 持有，**不阻塞 Phase 2 启动**。
 - **Next gate**: 同 Evidence #1。
+
+---
+
+## Evidence #3 — Phase 1.5 完工 (T006d/T006e/T006f/T006g)
+
+- **UTC**: 2026-04-21T05:45:00Z
+- **Trigger**: 用户指令 `finish-1.5`，要求 Phase 1 零债务收尾后再进 Phase 2。
+- **Tasks closed**: T006d (M1)、T006e (M2)、T006f (M3)、T006g (M4)。Phase 1.5 七条全绿。
+- **Commands & results**:
+  - `uv sync` → Resolved 39 packages in 1ms / Checked 39 packages in 1ms（无新装）
+  - `uv run ruff check src tests` → **All checks passed!**
+  - `uv run mypy src` → **Success: no issues found in 10 source files**
+  - `uv run pytest -q` → **3 passed in 0.15s**
+  - `uv build` → Successfully built `dist/orchestrator_kernel-0.1.0.tar.gz` + `dist/orchestrator_kernel-0.1.0-py3-none-any.whl`
+  - `python -m zipfile -l dist/*.whl` → **13 entries, workers_stub/ 0 entries** ✅（T006d verification 通过）
+- **Diff summary**:
+  - `pyproject.toml`: `[tool.hatch.build.targets.wheel].packages` 由 `["src/orchestrator_kernel", "src/workers_stub"]` 改为 `["src/orchestrator_kernel"]` + 3 行注释解释。
+  - `specs/001-orchestrator-kernel/research.md`: 新增 **R-11 workers_stub 包 layout 与 wheel 打包策略**（18 行 Decision/Rationale/Alternatives/Verification + Cross-reference 表追加 R-11 行）。
+  - `tests/__init__.py`、`tests/contract/__init__.py`、`tests/integration/__init__.py`、`tests/unit/__init__.py`：**4 份删除**（pytest 官方推荐 namespace 包）。
+  - `tests/conftest.py`: 顶部 docstring 新增 6 行 layout note 说明"故意不含 `__init__.py`"。
+  - `.gitattributes`: 新建 49 行（`* text=auto eol=lf` + 扩展名白名单 + Windows 专用 `*.ps1` CRLF + binary + `uv.lock` 标 generated）。
+  - `README.md`: 从 35 行 → 约 80 行，新增"Quickstart for developers"5 步（装 uv / `uv sync` / 4 条质量基线命令 / TDD 入口 / 验证证据）+ "工件位置" 扩展（9 份 contracts 显式列出）+ "分支策略（宪法 Article VIII）"。
+  - `specs/001-orchestrator-kernel/tasks.md`: T006d–T006g 4 条从 `[ ]` → `[x]`，每条加"已完成 finish-1.5 批次"备注；Checkpoint 改为"零债务收尾"。
+- **Wheel inspection verbatim**:
+  ```
+  orchestrator_kernel/__init__.py                  119 bytes
+  orchestrator_kernel/cli_main.py                  882 bytes
+  orchestrator_kernel/audit/__init__.py            80 bytes
+  orchestrator_kernel/contracts/__init__.py        102 bytes
+  orchestrator_kernel/entrypoints/__init__.py      75 bytes
+  orchestrator_kernel/kernel/__init__.py           141 bytes
+  orchestrator_kernel/llm/__init__.py              90 bytes
+  orchestrator_kernel/notifier/__init__.py         75 bytes
+  orchestrator_kernel/worker_supervisor/__init__.py 94 bytes
+  orchestrator_kernel-0.1.0.dist-info/*            METADATA / WHEEL / entry_points / RECORD
+  ```
+- **Conclusion**: ✅ Phase 1 Setup **零债务收尾**。baseline 5 gate（ruff / mypy / pytest / no-duplicate-deps / wheel-excludes-stub）全绿。
+- **Next gate**: 用户批准 Phase 2 Foundational 启动 → `/speckit-implement T007`（`tests/contract/test_entry_event.py` RED 先写）。

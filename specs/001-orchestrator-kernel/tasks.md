@@ -41,15 +41,12 @@
 - [x] T006a [P] **(H1)** Fix ruff E501 baseline reds：拆 `src/orchestrator_kernel/kernel/__init__.py` 单行 docstring → 多行；`src/orchestrator_kernel/cli_main.py` 的 `help=` 提取为常量 `_HELP`。验收：`uv run ruff check src tests` 0 errors。*(已完成 2026-04-21 fix-and-commit 批次)*
 - [x] T006b [P] **(H2)** 去除 `pyproject.toml` 中 `[project.optional-dependencies].dev` 与 `[dependency-groups].dev` 的双份重复；保留 PEP 735 `[dependency-groups]` 作唯一 dev deps 来源；上方加注释说明 pip 用户的 fallback 命令。验收：grep `optional-dependencies` 返回 0 行。*(已完成 2026-04-21 fix-and-commit 批次)*
 - [x] T006c [P] **(M5)** 在 `tests/test_scaffold.py` 文件顶部加 `⚠️ TRANSITIONAL FILE` 注释，说明它是 Phase 1 闸门，T007 落盘后 SHOULD remove；列出 4 条 trivially-asserted invariants 与 lifecycle。验收：人工 review 通过。*(已完成 2026-04-21 fix-and-commit 批次)*
-- [ ] T006d [P] **(M1)** 重新评估 `src/workers_stub/` 的 wheel 打包策略：
-  - 选项 A：保留 `src/workers_stub/`，在 `[tool.hatch.build.targets.wheel]` 用 `exclude` 把它从 wheel 剔除（仅作开发期 stub）；
-  - 选项 B：把它挪到 `tests/fixtures/workers/`，同步更新 plan.md §Project Structure 与 tasks.md T039/T057/T063/T075 的路径引用；
-  - 决策记录到 `research.md` 末尾追加 "Decision 11: workers_stub layout"。验收：`uv build` 后 wheel 内不应含 `crash_worker.py`。
-- [ ] T006e [P] **(M2)** pytest 包结构合规性回查：删除 `tests/{contract,integration,unit}/__init__.py` 与 `tests/__init__.py`（pytest 官方推荐 namespace 包），跑一次 `uv run pytest -q` 确认收集仍然成功；如果保留 `__init__.py`，在 `tests/conftest.py` 顶部加注释说明"已知风险：同名 test_*.py 跨子目录会冲突"。
-- [ ] T006f [P] **(M3)** 在仓库根新增 `.gitattributes`：`* text=auto eol=lf`、`*.py text eol=lf`、`*.toml text eol=lf`、`*.md text eol=lf`、`*.json text eol=lf`、`*.ps1 text eol=crlf`；首次 commit 后跑 `git add --renormalize .` 把现有 CRLF 文件重新规范化到 LF。验收：跨 OS clone 不再触发 CRLF warning。
-- [ ] T006g [P] **(M4)** 更新 repo 根 `README.md`：在 "Phases" 之后新增 "Quickstart for developers" 一节，包含 `uv sync` / `uv run pytest -q` / `uv run ruff check src tests` / `uv run mypy src` 4 条命令，并指向 `specs/001-orchestrator-kernel/validation.md` Evidence #1。验收：人工 review。
+- [x] T006d [P] **(M1)** 重新评估 `src/workers_stub/` 的 wheel 打包策略：决策 = 选项 A（保留 `src/workers_stub/` 在 pythonpath 下，从 `[tool.hatch.build.targets.wheel].packages` 中剔除）；research.md 新增 **R-11 workers_stub 的包 layout 与 wheel 打包策略** 详述 rationale / alternatives / verification。验收：`uv build` 后 wheel 内不含 `workers_stub/` 目录。*(已完成 2026-04-21 finish-1.5 批次)*
+- [x] T006e [P] **(M2)** pytest 包结构合规性回查：**删除** `tests/{contract,integration,unit}/__init__.py` 与 `tests/__init__.py` 共 4 个文件（pytest 官方推荐 namespace 包）；`tests/conftest.py` 顶部新增 layout note 说明"tests/ 故意不含 __init__.py，靠 rootdir + testpaths 发现"；回归 `uv run pytest --collect-only` → 3 tests collected 保持不变。验收：pytest 仍绿。*(已完成 2026-04-21 finish-1.5 批次)*
+- [x] T006f [P] **(M3)** 新建 `.gitattributes`：`* text=auto eol=lf`、`*.py/*.toml/*.md/*.json/*.yml/*.yaml/*.sh/uv.lock text eol=lf`、`*.ps1/*.psm1/*.cmd/*.bat text eol=crlf`、二进制文件标 `binary`、`uv.lock` 标 `linguist-generated=true`；首次 stage 后跑 `git add --renormalize .`（无额外 diff，表明现存文件将随下次写入自动规范化）。验收：`.gitattributes` 落盘。*(已完成 2026-04-21 finish-1.5 批次)*
+- [x] T006g [P] **(M4)** 重写 repo 根 `README.md`：新增 "Quickstart for developers" 5 步（装 uv / `uv sync` / 4 条质量基线命令 / TDD 循环入口 / 验证证据文件指路）；补 "工件位置" 的当前功能详细清单（含 9 份 contracts + 3 份 validation artifact）；补 "分支策略（宪法 Article VIII）" 一节。验收：人工 review。*(已完成 2026-04-21 finish-1.5 批次)*
 
-**Checkpoint**: 全部 follow-up 落盘后（或显式延期到 Polish 阶段），Phase 1 Setup 才算"硬性收尾"；当前 H1/H2/M5 已修，M1–M4 状态留给后续推进。
+**Checkpoint**: ✅ Phase 1.5 七条全部完成（H1/H2/M5 已在上一 commit、M1–M4 本 commit）。Phase 1 Setup **零债务收尾**；可以启动 Phase 2 Foundational（T007 契约测试 RED）。
 
 ---
 

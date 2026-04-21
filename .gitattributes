@@ -1,0 +1,49 @@
+# Normalize line endings across OSes.
+# See tasks.md T006f / review finding M3.
+# - Windows dev (hjx maintainer) uses CRLF locally but git stores LF in the object DB.
+# - macOS / Linux collaborators see native LF after clone.
+# - PowerShell scripts stay CRLF (Windows-only execution).
+# - Binary files are explicitly marked to skip conversion.
+
+* text=auto eol=lf
+
+# ---- Source code (LF) ----
+*.py       text eol=lf
+*.pyi      text eol=lf
+*.toml     text eol=lf
+*.cfg      text eol=lf
+*.ini      text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.json     text eol=lf
+*.jsonc    text eol=lf
+*.md       text eol=lf
+*.txt      text eol=lf
+*.sh       text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# ---- Windows-only scripts (CRLF) ----
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# ---- Lockfiles: keep LF for reproducibility across OSes ----
+uv.lock    text eol=lf
+poetry.lock text eol=lf
+
+# ---- Binary (no conversion, no diff) ----
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.whl  binary
+*.tar  binary
+*.gz   binary
+
+# ---- Generated / vendor: hide from diff noise ----
+uv.lock linguist-generated=true

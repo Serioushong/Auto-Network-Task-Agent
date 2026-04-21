@@ -32,7 +32,10 @@ dependencies = [
 orchestrator-kernel = "orchestrator_kernel.cli_main:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/orchestrator_kernel", "src/workers_stub"]
+# `workers_stub` is a dev-only test fixture (see research.md Decision 11) and
+# MUST NOT ship in the distribution wheel — one of its stubs deliberately OOMs.
+# Keep it under `src/` for pythonpath/editable convenience, but exclude from dist.
+packages = ["src/orchestrator_kernel"]
 
 # Dev dependencies live ONLY here (PEP 735). `uv sync` reads this group natively.
 # Pure-pip users (pip ≥ 25): `pip install --group dev .`

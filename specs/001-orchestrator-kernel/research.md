@@ -135,6 +135,23 @@
 
 ---
 
+## R-11 workers_stub 的包 layout 与 wheel 打包策略
+
+> 由 2026-04-21 `dry-run` 自审 finding M1 触发；对应 tasks.md T006d。
+
+- **Decision**: `src/workers_stub/` 保留在 `src/` 下（与 plan.md §Project Structure 一致），但**从 wheel 打包中排除**。`pyproject.toml` 的 `[tool.hatch.build.targets.wheel].packages` 仅列 `src/orchestrator_kernel`；`workers_stub` 通过 `[tool.pytest.ini_options].pythonpath = ["src"]` 在开发/测试时可 import，但不会随 `uv build` 进入最终 wheel。
+- **Rationale**:
+  1. **安全**：`crash_worker.py` 故意 OOM / 故意 raise，`danger_worker.py` 是 HIGH_RISK `file.delete` 演示 —— 这些 stub 一旦随 wheel 分发给下游，用户可能在未隔离环境中误调用。
+  2. **语义**：stub 是"测试夹具"语义，属于 tests/ 范畴；但放在 `src/workers_stub/` 便于多个 `tests/{unit,integration}/` 子目录共享 import 路径，且与 T039/T057/T063/T075 已在 tasks.md 固定的路径一致，改 layout 成本高。
+  3. **发行约束**：未来 `orchestrator-kernel` 若作为内部 wheel 分发，wheel 内只应有内核本身；stub 由 tests 仓库或 dev-only install 提供。
+- **Alternatives considered**:
+  - *把 stub 挪到 `tests/fixtures/workers/`*：语义更纯，但需要同步改 plan.md §Project Structure + tasks.md 4 条 path + 把 `conftest.py` 改造为动态添加 pythonpath —— 改动面超过 wheel exclude 一行配置，不划算。
+  - *保留 stub 在 wheel 里，在 `cli_main.py` 里加运行时拒绝加载*：防君子不防小人；且污染 wheel tree 且 wheel 大小变大。
+  - *完全不做 stub Worker，直接用 Python mock*：无法验证 subprocess stdio JSON-lines 协议、无法验证 Job Object 沙箱生效 —— 违反 P5 / SC-005 的 Independent Test 要求。
+- **Verification**: `uv build` 产出的 `dist/orchestrator_kernel-*.whl` 用 `python -m zipfile -l` 列出内容，**MUST NOT** 出现 `workers_stub/` 目录。(首次执行见 validation.md Evidence #3。)
+
+---
+
 ## Cross-reference
 
 | Research ID | Feeds into (Design artifact) | Locked constraint |
@@ -149,6 +166,7 @@
 | R-08 | `kernel/cancel.py`, `worker_supervisor/lifecycle.py`, FR-014 | CTRL_BREAK_EVENT → terminate → kill |
 | R-09 | `notifier/delivery.py`, FR-029, SC-010 | 0s / 1s / 4s / 16s, audit on final fail |
 | R-10 | `llm/client.py` | Protocol, no vendor SDK in MVP |
+| R-11 | `pyproject.toml` `[tool.hatch.build.targets.wheel]`, tasks.md T006d | `src/workers_stub/` in pythonpath, excluded from wheel |
 
 ---
 
