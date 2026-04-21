@@ -119,3 +119,69 @@
   - 2C-4 rate limit 2 条 test failure：误用同一 userId 循环 50 次，在第 11 次触达 `user_concurrent`（=10）而非 `global_rps`（=50）。测试逻辑修正为 50 个不同 userId 后全绿。
 - **Phase 2 Checkpoint**: ✅ **契约与基础设施就位**。可以启动 Phase 3~9 的 user stories；所有 user stories 并行就绪（契约层、状态机、审计、限流、payload 护栏皆已可注入）。
 - **Next gate**: 用户批准 Phase 3 启动 → `/speckit-implement T036`（`tests/integration/test_p1_basic_loop.py` RED 先写；echo-worker 闭环 MVP）。
+
+---
+
+## Evidence #5 — Phase 3 US1 MVP 完整闭环 (T036~T047)
+
+- **UTC**: 2026-04-21T08:15:00Z
+- **Trigger**: 用户指令 "继续 001-orchestrator-kernel Phase 3B-GREEN 批次 2（T043~T047）"；上一批 3B-GREEN 批次 1 已落 T039~T042（task_tree / dispatcher / supervisor / protocol codec）。
+- **Tasks closed**: T043（echo-worker stub）、T044（entrypoints/cli.py typer submit）、T045（cli_main assemble_kernel + KernelHarness）、T046（notifier.result_summary）、T047（全套 pytest 绿 + p95 记录）。
+- **Commands & results**:
+  - `.venv\Scripts\ruff.exe check src tests` → **All checks passed!**
+  - `.venv\Scripts\mypy.exe src` → **Success: no issues found in 33 source files**
+  - `.venv\Scripts\pytest.exe tests/integration -q` → **10 passed in 1.69s**（test_p1_basic_loop 4 / test_p1_no_worker 3 / test_worker_stdio_roundtrip 3）
+  - `.venv\Scripts\pytest.exe -q` → **416 passed in 2.13s**（Phase 2 累计 406 + Phase 3 新增 10）
+  - `.venv\Scripts\orchestrator-kernel.exe submit --text "echo hello" --audit-dir var/smoke-audit` → `traceId=01KPQHH4F9N6KZF1Z54H395KGZ outcome=all_succeeded duration=0.00s` + 一行合同级 ResultSummary JSON（`kind=result_summary / traceOutcome=all_succeeded / leafResults=[{capability=echo.say,outcome=succeeded}] / message="hello"`）
+- **SC-002 p95 micro-bench** (30 次 warm-path submit，echo-worker 已注册)：
+  - min = 0.0015 s / median = 0.0016 s / **p95 = 0.0019 s** / max = 0.0023 s
+  - 全部 30 次均 `traceOutcome=all_succeeded`
+  - 预算 ≤ 3 s（spec.md SC-002）；实测 p95 相当于预算的 **0.063%**，大量余量（余量主要用于未来 LLM 规划、多 leaf、真实 Worker I/O）。
+  - 冷启（首发 submit 含 spawn + register）：integration test 端到端（含 fixture teardown）仍 ≤ 1 s 内收敛。
+- **Diff summary (本批 3B-GREEN 批次 2)**:
+  - `src/workers_stub/echo_worker.py`（130 行新建）：独立 stdio 可执行；startup `RegisterFrame` / 响应 `dispatch` 的 `StartedFrame + ResultFrame(succeeded, output.text=payload.text)` / `shutdown` 干净退 0 / malformed JSON `continue`。
+  - `src/orchestrator_kernel/notifier/result_summary.py`（162 行新建）：`build_command_digest` / `compute_trace_outcome` / `_build_message` / `build_result_summary` / `print_to_cli`；`leaf_outputs` map 把 ResultFrame 的 output 回填 message。
+  - `src/orchestrator_kernel/cli_main.py`（385 行重写，从占位 30 行升级）：`KernelHarness` 类（register_worker / submit / shutdown / _execute_leaf）；`assemble_kernel(audit_dir)` async factory；planner stub `_plan_capability`（echo → echo.say，其它 → desktop.click）；`_WorkerChannel`（asyncio.Lock 守 dispatch-started-result 原子性）；8 条审计事件构造；`_map_worker_failure` 把 WorkerFailureReason 折到 Task.FailureReason。
+  - `src/orchestrator_kernel/entrypoints/cli.py`（150 行新建）：Typer subapp；`submit` / `status` 命令；`Annotated[...]+typer.Option` 规避 B008；`ORCHESTRATOR_USER` env 作 `--user-id` fallback；`--worker` 可重复。
+- **Audit chain verification** (test_echo_hello_audit_chain_complete)：JSONL 按序出现 `event_received → trace_created → task_created → task_dispatched → task_started → task_succeeded → result_summary_prepared → result_summary_delivered`（外加 root_intent 的 `task_created` 与 `worker_registered`，不影响顺序断言）。FR-006 / FR-019 满足。
+- **No-capable-worker branch verification** (test_no_capable_worker_audit_shape)：`desktop.click` intent 下 `task_failed.extra.failureReason == "no_capable_worker"`；`result_summary_delivered` 仍然出现 → FR-029（用户不轮询仍能得知失败）满足。
+- **Phase 3 Checkpoint**: ✅ **US1 MVP 独立可用**。`orchestrator-kernel submit` 命令可端到端演示；T047 要求的 integration 绿 + p95 证据齐全。
+- **Next gate**: 用户批准 Phase 4 启动 → `/speckit-implement T048`（`tests/integration/test_p2_idempotency.py` RED 先写；幂等层 T051 接在 cli_main 现有管线的 "payload-size → schema → rate-limit" 之后、"trace 创建" 之前）。
+
+---
+
+## Evidence #6 — Phase 4 US2 幂等性保证完整闭环 (T048~T054)
+
+- **UTC**: 2026-04-21T08:27:12Z
+- **Trigger**: 用户指令 "继续执行Phase 4"；延续 Evidence #5 的 US1 MVP，本批把 INV-1（每条 EntryEvent 在内核视角下有且只有一个 Trace）从"契约声明"升级到"代码强制 + 集成证据"。
+- **Tasks closed**: T048（integration RED）、T049（hypothesis `RuleBasedStateMachine` RED）、T050（unit cache RED，含 50 路 `asyncio.gather` 压测）、T051（`kernel/idempotency.py` GREEN）、T052（`cli_main.KernelHarness.submit` 接入）、T053（`event_received` + `idempotent_replay` 两类审计透传 `idempotent_replay=true`）、T054（三文件测试套件全绿）。
+- **TDD 痕迹 (诚实披露)**:
+  - T050 RED → GREEN：初版 `lookup_or_register` 返回的 `snapshot` 类型错配（曾返回 `dict`，测试断言 `CachedTrace` 实例），以 `@dataclass(frozen=True) CachedTrace` 统一对外类型一次修复。
+  - T049 RED → GREEN：hypothesis 把 `state.check_invariants()` 要求 runtime 参数，改用 `IdempotencyMachine.TestCase` 作为 pytest 入口即 OK（hypothesis 惯用法）。
+  - T048 RED：4/4 条整合测试均命中"不同 traceId"断言，完全符合 FR-022 / FR-023 未实现状态；T052 接入后 4/4 GREEN（concurrent 路径依赖 `threading.Lock` + sync API 保证 compound check-and-set 原子）。
+- **Commands & results**:
+  - `.venv\Scripts\ruff.exe check src tests` → **All checks passed!**
+  - `.venv\Scripts\mypy.exe src` → **Success: no issues found in 34 source files**（新增 `kernel/idempotency.py`）
+  - `.venv\Scripts\pytest.exe tests/integration/test_p2_* tests/unit/test_idempotency_cache.py -q` → **13 passed in 1.12s**（integration 4 + property 1 + unit 8）
+  - `.venv\Scripts\pytest.exe -q` → **429 passed in 2.96s**（Phase 3 416 + 本批新增 13）
+- **P2 Acceptance Scenarios 验证**:
+  - **Scenario 1 (terminal replay)**: 1 fresh + 4 replays 同 `eventId=E2`，审计恰好 1 条 `task_dispatched` + 4 条 `eventType=idempotent_replay && idempotent_replay=true`（`extra.eventId` 匹配）。
+  - **Scenario 2 (running / concurrent)**: `asyncio.gather` 3 路并发同 `eventId`，3 个 `traceId` 合并为 1；`task_dispatched` 计数 = 1。
+  - **Scenario 3 (failed replay)**: `desktop.click` intent 首投失败（`no_capable_worker`）→ 重投同 `eventId` 返回同 `traceId` + 同 `traceOutcome=all_failed`；`task_failed` 审计计数 = 1（replay 不再二次落 `task_failed`）。
+  - **Edge: 跨用户同 eventId**: `(alice, E2)` 与 `(bob, E2)` 各自独立 traceId，两次都 fresh（spec.md Edge Cases 要求）。
+- **INV-1 证据 (hypothesis 50×25 步)**: `replay_count == total_lookups - unique_keys` 两条不变量在 1250 次随机步上全部持有；`trace_for_key.values()` 去重后长度不变（不存在两 key 指向同一 traceId 的情况）。
+- **Diff summary (本批 Phase 4)**:
+  - `src/orchestrator_kernel/kernel/idempotency.py`（158 行新建）：`CachedTrace` frozen dataclass + `IdempotencyCache` 类（`lookup_or_register` / `mark_terminal` / `restore_entry` / `__contains__` / `__len__`）；`threading.Lock` 守 compound check-and-set；ULID 工厂可注入便于测试；`restore_entry` 作为 R-03 "从审计日志重建缓存" 的挂钩。
+  - `src/orchestrator_kernel/cli_main.py`（+63/-16）：`KernelHarness.__init__` 新增 `idempotency_cache` 注入点（默认内存实例）；`submit` 管线在 `EntryEvent` 构造后立即 `lookup_or_register`，replay 路径抽出 `_build_replay_result`（短路不过 task_tree / dispatcher / supervisor）；fresh 路径在终态写 `mark_terminal` 前即可被并发 replay 命中（锁保证）。
+  - `tests/unit/test_idempotency_cache.py`（150 行新建，8 tests）；`tests/integration/test_p2_idempotency.py`（153 行新建，4 tests）；`tests/integration/test_p2_idempotency_property.py`（98 行新建，hypothesis 1 TestCase）。
+- **FR 覆盖**:
+  - FR-002 / FR-022：同 `(userId, eventId)` 重复投递必返回同一 `traceId`（8 unit + 4 integration 双证）。
+  - FR-023：replay 计数 = `总投递 - 唯一 key`（hypothesis 不变量）；R-03 重建路径留 `restore_entry` 挂钩（Phase 7 落地）。
+  - INV-1：hypothesis `RuleBasedStateMachine` 50×25 随机步 + 并发压测双证。
+- **CLI 进程内 vs 跨进程幂等 (诚实披露)**:
+  - CLI smoke `1..3 | orchestrator-kernel submit --event-id E-SMOKE-12345678 --text "echo hi"` 实测 3 次返回 3 个不同 traceId，审计 3 条 `task_dispatched`，0 条 `idempotent_replay` — 原因是当前 `IdempotencyCache` 仅内存态，每次 CLI 进程退出后失效。
+  - quickstart §2.4 "5 次同 eventId 返回同一 traceId + 4 条 replay 审计" 的跨进程演示依赖 R-03（从审计日志重建缓存），明确归属 **Phase 7（audit scanner + restore）**，`IdempotencyCache.restore_entry()` 已留挂钩。
+  - 本批 GREEN 的契约范围是"进程内并发/顺序重投幂等"，由 4 条 integration + 8 条 unit + 1 条 hypothesis 覆盖；spec.md FR-022 / FR-023 + INV-1 在该范围内 **PASS**。
+- **Phase 4 Checkpoint**: ✅ **进程内 US2 MVP 独立可用**（`asyncio.gather` 并发 + 顺序重投均只调用一次 Worker）；跨进程 quickstart §2.4 演示阻塞于 Phase 7 R-03。
+- **Next gate**: 用户批准 Phase 5 启动 → `/speckit-implement T055`（HIGH_RISK 审批门 RED；`pending_approval` → `approve` / `deny` / `timeout` 三分支）。或先补 Phase 7 T084 audit-scanner 让 CLI 跨进程 demo 转绿。
+

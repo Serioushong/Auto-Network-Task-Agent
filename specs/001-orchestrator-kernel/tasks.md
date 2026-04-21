@@ -122,13 +122,13 @@
 - [x] T040 [US1] Implement capability dispatcher in `src/orchestrator_kernel/kernel/dispatcher.py`：按 `(capability, healthy)` 匹配 Worker；无匹配落 `failed(no_capable_worker)`。*(3B-GREEN 批次 1 / 2026-04-21：`WorkerHandle` / `Dispatcher` / `NoCapableWorkerError`；capability 索引 O(1)；`assign()` 校验 `kind==leaf_action` 与 `capability!=None`；unhealthy 候选通过异常携带供审计引用。)*
 - [x] T041 [US1] Implement subprocess worker supervisor in `src/orchestrator_kernel/worker_supervisor/supervisor.py`：`spawn(worker_script_path, *, creationflags=CREATE_NEW_PROCESS_GROUP)`；绑定 Windows Job Object（占位 API，T074 补全真实限制）。*(3B-GREEN 批次 1 / 2026-04-21：`SupervisedWorker` / `WorkerSupervisor` / `WorkerSpawnError`；Win32 走 `CREATE_NEW_PROCESS_GROUP`，POSIX 走 `start_new_session=True`；`_bind_job_object(pid)` 显式 no-op + TODO T074；`terminate/kill/shutdown` 吞 `ProcessLookupError` 保证 teardown 幂等。本批次 cli_main 尚未接入，模块实现完备但暂无真实 subprocess 调用。)*
 - [x] T042 [US1] Implement stdio JSON-lines protocol reader/writer in `src/orchestrator_kernel/worker_supervisor/protocol.py`：异步读 stdout、按行 JSON parse + pydantic `WorkerFrame` 校验；异步写入 dispatch/abort/shutdown 帧。*(3B-GREEN 批次 1 / 2026-04-21：`encode_frame/decode_frame` 纯字节 codec + `read_frames/write_frame` async helpers（typed against `asyncio.StreamReader/Writer`）；malformed frame -> `ProtocolFrameError(raw=...)` 夹带 ≤256 byte 预览；`read_frames()` 遇异常 `continue` 以兑现 T038 test 3 的"父进程存活"契约；编码侧守 `\n` in body 防破包。)*
-- [ ] T043 [US1] Implement `echo-worker` stub in `src/workers_stub/echo_worker.py`：一个独立 `python -m` 可执行脚本；启动即发 `register` 帧（capability `echo.say` NORMAL）；收到 `dispatch` 后 50 ms 内回 `started` 再回 `result(succeeded, output.text=payload.text)`。
-- [ ] T044 [US1] Implement CLI `submit` command in `src/orchestrator_kernel/entrypoints/cli.py` 使用 typer：参数 `--text`（必需）、`--event-id`（可选自动生成）、`--user-id`（可选从 env 取）、`--source-channel=cli`。
-- [ ] T045 [US1] Wire top-level async event loop in `src/orchestrator_kernel/cli_main.py`：装配 config → audit writer → validators → rate limiter → idempotency (stub) → task tree → dispatcher → supervisor → notifier；提供 `app = typer.Typer()` 供 entry_point。
-- [ ] T046 [US1] Implement minimal `ResultSummary` 生成 + CLI 前台打印 in `src/orchestrator_kernel/notifier/result_summary.py`（交付完整版留到 US6 T075）。
-- [ ] T047 [US1] 跑 `pytest tests/integration/test_p1_* tests/integration/test_worker_stdio_roundtrip.py -q` 全绿；在 `validation.md` 记录端到端 p95 实测值。
+- [x] T043 [US1] Implement `echo-worker` stub in `src/workers_stub/echo_worker.py`：一个独立 `python -m` 可执行脚本；启动即发 `register` 帧（capability `echo.say` NORMAL）；收到 `dispatch` 后 50 ms 内回 `started` 再回 `result(succeeded, output.text=payload.text)`。*(3B-GREEN 批次 2 / 2026-04-21：同步 stdin 读 + stdout 二进制写 + LF 帧；register 用真正的 `RegisterFrame` 模型序列化（`model_dump_json(exclude_none=True)`）保证跟契约测试同 codec；malformed JSON 走 continue 不崩父进程；`shutdown` 帧干净退 0。)*
+- [x] T044 [US1] Implement CLI `submit` command in `src/orchestrator_kernel/entrypoints/cli.py` 使用 typer：参数 `--text`（必需）、`--event-id`（可选自动生成）、`--user-id`（可选从 env 取）、`--source-channel=cli`。*(3B-GREEN 批次 2 / 2026-04-21：`Annotated[...]`+typer.Option 规避 B008；`--user-id` 默认从 `ORCHESTRATOR_USER` env 取，最终 fallback 到 `cli-user`；`--worker` 可重复指定，不传时自动 spawn 本仓库 `echo_worker.py`；sourceChannel 固定 `"cli"`（harness.submit 层写死）。)*
+- [x] T045 [US1] Wire top-level async event loop in `src/orchestrator_kernel/cli_main.py`：装配 config → audit writer → validators → rate limiter → idempotency (stub) → task tree → dispatcher → supervisor → notifier；提供 `app = typer.Typer()` 供 entry_point。*(3B-GREEN 批次 2 / 2026-04-21：`assemble_kernel(audit_dir)` 异步工厂返回 `KernelHarness`；`KernelHarness.register_worker/submit/shutdown` 实现 integration 测试的 KernelHarnessProtocol；单事件 pipeline `payload-size → EntryEvent → plan stub → task_tree → dispatcher.assign → DispatchFrame/Started/Result → state_machine.transition → ResultSummary → print_to_cli`；audit 链 8 步齐备（event_received → trace_created → task_created → task_dispatched → task_started → task_succeeded → result_summary_prepared → result_summary_delivered），no_capable_worker 分支写 `task_failed(failureReason=no_capable_worker)` 后仍发 ResultSummary；rate limiter / idempotency 仍 stub 占位，T051/T092 再接。)*
+- [x] T046 [US1] Implement minimal `ResultSummary` 生成 + CLI 前台打印 in `src/orchestrator_kernel/notifier/result_summary.py`（交付完整版留到 US6 T075）。*(3B-GREEN 批次 2 / 2026-04-21：`build_command_digest`（≤256 char trim with ellipsis）+ `compute_trace_outcome`（6-路 roll-up: kernel_restarted 预留 / cancelled / denied / all_succeeded / all_failed / partial_failed）+ `build_result_summary`（`leaf_outputs` map 通过 ResultFrame.output 回流给 message 字段）+ `print_to_cli`（stdout 单行 JSON，契约同 schema）。)*
+- [x] T047 [US1] 跑 `pytest tests/integration/test_p1_* tests/integration/test_worker_stdio_roundtrip.py -q` 全绿；在 `validation.md` 记录端到端 p95 实测值。*(3B-GREEN 批次 2 / 2026-04-21：`pytest tests/integration -q` → **10 passed in 1.69s**（test_p1_basic_loop 4 + test_p1_no_worker 3 + test_worker_stdio_roundtrip 3）；`pytest -q` 全量 → **416 passed in 2.13s**；SC-002 p95 微基准 30 iter warm path = **0.0019 s**（远低于 3 s 预算），见 validation.md Evidence #5。)*
 
-**Checkpoint**: US1 独立可用；MVP 基线建立。可在此单独 demo。
+**Checkpoint**: ✅ Phase 3 US1 MVP 完整闭环 **2026-04-21 完成**（3A-RED T036~T038 + 3B-GREEN 批次 1 T039~T042 + 3B-GREEN 批次 2 T043~T047）；`orchestrator-kernel submit --text "echo hello"` 真机 smoke 通过，输出合同级 ResultSummary JSON。全套 **416 tests passed**；`ruff` / `mypy --strict`（33 source files）全绿。可在此单独 demo，准备启动 Phase 4 (US2 幂等)。
 
 ---
 
@@ -140,16 +140,16 @@
 
 ### Tests for US2 (RED)
 
-- [ ] T048 [P] [US2] Write failing integration test `tests/integration/test_p2_idempotency.py`：覆盖 P2 的 3 个 Acceptance Scenarios（已完成终态、running 中、已失败三支）。
-- [ ] T049 [P] [US2] Write failing hypothesis test `tests/integration/test_p2_idempotency_property.py`：`RuleBasedStateMachine`，rules = {submit, duplicate_submit, wait_terminal}；invariants = INV-1 + audit replay 计数 = 原次数 − 1。
-- [ ] T050 [P] [US2] Write failing unit test `tests/unit/test_idempotency_cache.py`：纯函数 `lookup_or_register((userId, eventId)) -> (traceId, is_replay)`；并发 race 不破坏键唯一性（用 `anyio.create_task_group` 压测）。
+- [x] T048 [P] [US2] Write failing integration test `tests/integration/test_p2_idempotency.py`：覆盖 P2 的 3 个 Acceptance Scenarios（已完成终态、running 中、已失败三支）+ 跨用户同 eventId 独立性边界。
+- [x] T049 [P] [US2] Write failing hypothesis test `tests/integration/test_p2_idempotency_property.py`：`RuleBasedStateMachine`，rules = {submit, duplicate_submit, mark_terminal}；invariants = INV-1 + `replay_count == total_lookups - unique_keys`。
+- [x] T050 [P] [US2] Write failing unit test `tests/unit/test_idempotency_cache.py`：`lookup_or_register((userId, eventId)) -> (traceId, is_replay, snapshot)`；50 路 `asyncio.gather` 压测并发只允许 1 个 `is_replay=False`。
 
 ### Implementation for US2 (GREEN)
 
-- [ ] T051 [US2] Implement idempotency cache in `src/orchestrator_kernel/kernel/idempotency.py`：内存 dict + `anyio.Lock`；hit 时返回首次 traceId 与当前 state snapshot。
-- [ ] T052 [US2] Wire idempotency check into `cli_main.py` 事件接入管线（在 payload-size / schema / rate-limit 之后、trace 创建之前）。
-- [ ] T053 [US2] 在 audit writer 支持 `idempotent_replay=true` 字段（T031 已接 AuditEvent schema，此处只需使用）。
-- [ ] T054 [US2] 跑 `pytest tests/integration/test_p2_* tests/unit/test_idempotency_cache.py -q` 全绿。
+- [x] T051 [US2] Implement idempotency cache in `src/orchestrator_kernel/kernel/idempotency.py`：内存 dict + `threading.Lock`；`lookup_or_register` 返回 `(trace_id, is_replay, CachedTrace|None)`；`mark_terminal` 记录终态快照；`restore_entry` 挂钩留给 R-03 审计扫描重建。
+- [x] T052 [US2] Wire idempotency check into `cli_main.py` 事件接入管线（在 payload-size / EntryEvent 校验之后、trace_created 之前）；替换 Phase 3 的 `_new_id()` 一次性 traceId stub，终态时调用 `mark_terminal` 存快照；`replay` 路径直接合成 `TraceResult` 不再落 `task_*` 审计。
+- [x] T053 [US2] Audit writer `idempotent_replay` 字段在 `event_received` + `idempotent_replay` 两类事件透传（T031 AuditEvent schema 已支持）。
+- [x] T054 [US2] `pytest tests/integration/test_p2_* tests/unit/test_idempotency_cache.py -q` 全绿（13/13）；整体套件仍 429 绿。
 
 **Checkpoint**: US1 + US2 可独立 demo（含"重复投递不再副作用"的演示）。
 
