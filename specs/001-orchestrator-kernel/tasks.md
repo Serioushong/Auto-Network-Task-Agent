@@ -96,7 +96,7 @@
 
 - [ ] T039 [US1] Implement Task tree builder in `src/orchestrator_kernel/kernel/task_tree.py`：`build_from_event(event, capability_plan) -> Task tree`；MVP 支持根 + 单叶。
 - [ ] T040 [US1] Implement capability dispatcher in `src/orchestrator_kernel/kernel/dispatcher.py`：按 `(capability, healthy)` 匹配 Worker；无匹配落 `failed(no_capable_worker)`。
-- [ ] T041 [US1] Implement subprocess worker supervisor in `src/orchestrator_kernel/worker_supervisor/supervisor.py`：`spawn(worker_script_path, *, creationflags=CREATE_NEW_PROCESS_GROUP)`；绑定 Windows Job Object（占位 API，T067 补全真实限制）。
+- [ ] T041 [US1] Implement subprocess worker supervisor in `src/orchestrator_kernel/worker_supervisor/supervisor.py`：`spawn(worker_script_path, *, creationflags=CREATE_NEW_PROCESS_GROUP)`；绑定 Windows Job Object（占位 API，T074 补全真实限制）。
 - [ ] T042 [US1] Implement stdio JSON-lines protocol reader/writer in `src/orchestrator_kernel/worker_supervisor/protocol.py`：异步读 stdout、按行 JSON parse + pydantic `WorkerFrame` 校验；异步写入 dispatch/abort/shutdown 帧。
 - [ ] T043 [US1] Implement `echo-worker` stub in `src/workers_stub/echo_worker.py`：一个独立 `python -m` 可执行脚本；启动即发 `register` 帧（capability `echo.say` NORMAL）；收到 `dispatch` 后 50 ms 内回 `started` 再回 `result(succeeded, output.text=payload.text)`。
 - [ ] T044 [US1] Implement CLI `submit` command in `src/orchestrator_kernel/entrypoints/cli.py` 使用 typer：参数 `--text`（必需）、`--event-id`（可选自动生成）、`--user-id`（可选从 env 取）、`--source-channel=cli`。
@@ -186,7 +186,7 @@
 
 ### Tests for US5 (RED)
 
-- [ ] T070 [P] [US5] Write failing integration test `tests/integration/test_p5_crash_isolation.py`：并行 3 条 trace，1 条 Worker 崩溃；断言 SC-005 + 内核 pid 不变。
+- [ ] T070 [P] [US5] Write failing integration test `tests/integration/test_p5_crash_isolation.py`：并行 3 条 trace，1 条 Worker 崩溃；断言 SC-005 + 内核 pid 不变；**并显式断言 INV-4**（活下来的两条 trace 的非终态 Task 全程存在于 `kernel.runtime_tasks` 集合中；崩溃的那条 Task 从 `runtime_tasks` 中被移除并仅保留终态审计事件）。
 - [ ] T071 [P] [US5] Write failing unit test `tests/unit/test_resource_monitor.py`：mock psutil；断言 500 ms 采样周期 + 超限立即转 `failed(sandbox_limit)`。
 - [ ] T072 [P] [US5] Write failing integration test `tests/integration/test_budget_exceeded.py`：Worker 故意超 `wall_clock_ms` budget；断言 `failed(budget_exceeded, dim=wall)`。
 
@@ -263,7 +263,7 @@
 - [ ] T100 [P] Write `src/orchestrator_kernel/README.md`：对齐 `quickstart.md` 的开发者 recap；列 entry points 与 subpackage 职责。
 - [ ] T101 Run `quickstart.md §2~§5` 全程手动演练；将输出 + 时延 + 审计片段写入 `specs/001-orchestrator-kernel/validation.md`（首次人工验收演练证据，宪法 Article VIII 合并 `main` 的条件之一）。
 - [ ] T102 跑 `pytest -q`（全套）+ `ruff check src tests` + `mypy src`；三者皆绿。
-- [ ] T103 更新 spec.md FR-024 措辞："5 类 schema" → "9 类 schema" + 版本号自 `1.0.0 → 1.1.0`（MINOR 扩展）；同步到 `checklists/requirements.md` 的 Resolution Log。
+- [x] T103 更新 spec.md FR-024 措辞："5 类 schema" → "9 类 schema" + 版本号自 `1.0.0 → 1.1.0`（MINOR 扩展）；同步到 `checklists/requirements.md` 的 Resolution Log。**（已在 /speckit-analyze 后的 R2 补丁中提前完成，2026-04-21）**
 - [ ] T104 在 `specs/001-orchestrator-kernel/analysis-precheck.md` 写一张 FR × Task 覆盖矩阵，供下一步 `/speckit-analyze` 消费。
 
 **Checkpoint**: 全绿 + 手动验收 + 覆盖矩阵齐备；具备 `/speckit-analyze` 条件。

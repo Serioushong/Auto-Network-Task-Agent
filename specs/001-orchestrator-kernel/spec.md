@@ -2,8 +2,24 @@
 
 **Feature Branch**: `hjx` (per Constitution Article VIII: no per-feature branch)
 **Created**: 2026-04-21
-**Status**: Draft
+**Spec Version**: 1.1.0
+**Last Updated**: 2026-04-21 (post `/speckit-analyze` R2 patch)
+**Status**: Ready-for-Implement (pending `/speckit-implement`)
 **Input**: User description: "主 Agent 编排内核 MVP——构建多 Agent 自动化协同办公系统的大脑。接收外部入口投递的自然语言指令，转化为 Task 树，分派给具备相应能力的子 Agent，全过程维护任务生命周期、执行隔离、人工审批、审计日志、幂等性、可取消性。本阶段仅实现内核本身，Worker Agent 与飞书入口均以 stub 形式存在。"
+
+<!--
+Sync Impact Report (Spec Version 1.0.0 → 1.1.0)
+- Rationale: /speckit-plan 阶段契约由 5 类扩展到 9 类（新增 worker-protocol、audit-event、result-summary、contracts/README；entry-event 与 task/budget/worker-registration/approval/cancel 正式拆分为独立 schema 文件）。spec 层 FR-024 原措辞仅覆盖 5 类，与 contracts/ 目录实际产物不一致（见 /speckit-analyze Finding F1）。
+- Bump type: MINOR — 扩大已有 FR 的覆盖面，不改变任何既有验收语义，无 FR 被删除或重写。
+- Changes:
+  * FR-024: "5 类 schema" → "9 类 schema"，并显式枚举 9 份契约文件名。
+- Downstream consistency:
+  * plan.md Phase 1（9 份 schema）✔ 已一致
+  * contracts/README.md（9 份 schema 索引）✔ 已一致
+  * tasks.md T007~T024（9×2 契约测试 + pydantic 镜像）✔ 已一致
+  * checklists/requirements.md Resolution Log ✔ 已补 Q6 行
+-->
+
 
 ## Clarifications
 
@@ -205,7 +221,7 @@ Alpha 用户对一个正在运行中的 traceId 投递"取消"指令，编排内
 
 **契约先行（对应 Constitution VII）**
 
-- **FR-024**: 入口事件、Task 树消息、Worker 注册消息、审批消息、取消消息的 schema MUST 在 plan 阶段以机器可校验格式先行定义；实现代码只允许消费已定义的 schema。
+- **FR-024**: 跨边界消息的 schema MUST 在 plan 阶段以机器可校验格式（JSON Schema draft 2020-12）先行定义；实现代码只允许消费已定义的 schema。MVP 契约面共 **9 类 schema**，对应 `specs/001-orchestrator-kernel/contracts/` 下 9 份文件：(1) `entry-event.schema.json`、(2) `task.schema.json`、(3) `budget.schema.json`、(4) `worker-registration.schema.json`、(5) `worker-protocol.schema.json`（Kernel ↔ Worker stdio JSON-lines 帧联合）、(6) `approval-message.schema.json`（请求 / 响应联合）、(7) `cancel-message.schema.json`、(8) `audit-event.schema.json`、(9) `result-summary.schema.json`（终态主动回推）。任何新增跨边界消息 MUST 先补 schema 再写实现。
 
 **速率限制与并发控制（对应 Constitution II / III 的滥用防御）**
 

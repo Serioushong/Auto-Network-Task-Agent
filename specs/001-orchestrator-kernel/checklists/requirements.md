@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning.
 **Created**: 2026-04-21
-**Last Updated**: 2026-04-21 (post `/speckit-clarify` Session 2026-04-21)
+**Last Updated**: 2026-04-21 (post `/speckit-analyze` R2 patch — spec 1.0.0 → 1.1.0)
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -42,7 +42,7 @@
 - [x] IV.  Observability & Audit    — FR-006 / FR-019/020/021 + FR-028 审计扫描恢复 + SC-006/009
 - [x] V.   Sandboxed Execution      — FR-016/017/018 + P5 / SC-005
 - [x] VI.  Idempotent & Replayable  — P2 / FR-002/022/023 + FR-028（重启重投必须用新 eventId）+ SC-003
-- [x] VII. Contract-First           — FR-024（Schema 先行，plan 阶段落地；含结果汇总消息 schema）
+- [x] VII. Contract-First           — FR-024（9 类 schema 先行，plan 阶段已全部落地于 contracts/；含结果汇总消息 schema）
 - [x] VIII.Branch Dual-Gate         — Feature Branch 字段与 Constitution Article VIII 显式对齐（本功能不开独立分支）
 
 ## Clarification Resolution Log
@@ -54,6 +54,7 @@
 | Q3 | 速率 / 并发限制 | FR-025/026/027 + 新 edge case | capability 风险分级：NORMAL ≤ 10 活跃 trace / 用户；HIGH_RISK ≤ 1 未决 Task / 用户；全局 50 rps，每用户 120 rpm |
 | Q4 | 内核崩溃恢复语义 | FR-028/029/030 + 新 edge case + SC-009/010 | Fail-fast 扫描审计日志补终态 + 来源通道主动回推结果汇总，不依赖用户轮询 |
 | Q5 | 入口事件 payload 上限 | FR-031 + 更新 edge case + SC-011 | `text` ≤ 16 KB；配置可覆写，硬顶 1 MB；超限立即拒绝，不触发任何 Task |
+| Q6 | 契约面广度（post-analyze） | FR-024 + spec 1.0.0 → 1.1.0 | 9 类 schema（entry-event / task / budget / worker-registration / worker-protocol / approval / cancel / audit-event / result-summary）；与 plan.md Phase 1、contracts/ 目录、tasks.md T007~T024 完全一致 |
 
 ## Notes
 
