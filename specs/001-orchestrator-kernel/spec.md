@@ -5,6 +5,16 @@
 **Status**: Draft
 **Input**: User description: "主 Agent 编排内核 MVP——构建多 Agent 自动化协同办公系统的大脑。接收外部入口投递的自然语言指令，转化为 Task 树，分派给具备相应能力的子 Agent，全过程维护任务生命周期、执行隔离、人工审批、审计日志、幂等性、可取消性。本阶段仅实现内核本身，Worker Agent 与飞书入口均以 stub 形式存在。"
 
+## Clarifications
+
+### Session 2026-04-21
+
+- Q: HIGH_RISK Task 的人工审批超时默认值？ → A: 10 分钟（Option A，风险暴露最短；容忍短时离席，超过则判定为 denied_by_timeout）
+- Q: 每任务的预算上限（wall-clock / tool-call / token）如何设定？ → A: 按 capability 自声明（Option D）。Worker 注册时 MUST 为每个 capability 声明 `{wall_clock_ms, max_tool_calls, max_tokens}`；未声明则 fallback 到保守默认（wall 60s / 10 calls / 20k tokens）；内核另设系统硬顶（wall 30min / tool-call 200 / token 500k），任何声明值不得超越硬顶
+- Q: 入口事件速率限制与每用户并发上限？ → A: 按 capability 风险分级（Option C）。普通 capability 每用户并发活跃 trace ≤ 10；HIGH_RISK capability 每用户并发未决 / 运行中 Task ≤ 1（防审批洪水）；全局入口峰值 ≤ 50 events/sec；每用户入口 ≤ 120 events/min。超限回 `rejected(reason=rate_limited)`，入审计，不入 Task 队列
+- Q: 内核崩溃 / 重启后 in-flight Task 的恢复语义？ → A: Fail-fast（Option A）+ 结果回推。内核重启后所有 in-flight Task（`pending | dispatched | running | pending_approval`）MUST 被置为 `failed(reason=kernel_restart)`；内核状态纯内存，无需持久化 Task 状态；审计日志（磁盘）为事实来源。**追加约束**：每个 Task 的终态（succeeded / failed / cancelled / denied / denied_by_timeout）MUST 由内核主动经来源通道回推给命令发号者，并附本次 trace 的结果汇总（按 traceId 聚合所有叶 Task 的 outcome），用户不得依赖轮询
+- Q: 入口事件 payload 大小上限？ → A: text ≤ 16 KB（Option A，严格但安全）。超限 MUST 立即拒绝 `rejected(reason=payload_too_large, limit=16KB)`，不入 Task 队列，不做截断；阈值在部署配置可覆写，但覆写值 MUST ≤ 系统硬顶 1 MB
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — 基本分派闭环 (Priority: P1)
@@ -133,7 +143,9 @@ Alpha 用户对一个正在运行中的 traceId 投递"取消"指令，编排内
 - **事件 ID 冲突于不同用户**：两用户提交的 eventId 恰好相同 —— 系统 MUST 按 `(userId, eventId)` 作为幂等键，不互相遮蔽。
 - **审计日志磁盘写满**：新事件无法落盘时，内核 MUST 拒绝处理新入口事件并发出健康告警，**不允许**为节省空间静默丢弃日志。
 - **Worker 注册信息与实际能力不符**：Worker 声明 capability 但实际未实现 —— 首次调用时检测到后立即置 Worker 为 `unhealthy`，该 capability 从分派候选中剔除直至下一次健康心跳。
-- **超大 payload**：入口事件 text 字段异常大（例如 > 1 MB）—— 内核 MUST 按默认阈值拒绝并回写 `rejected(reason=payload_too_large)`。
+- **超大 payload**：入口事件 `text` 字段超过 16 KB（默认阈值，见 FR-031）—— 内核 MUST 立即拒绝并回 `rejected(reason=payload_too_large, limit=16KB, actual=<bytes>)`，MUST NOT 截断后继续处理，MUST NOT 创建 Task 树，并按 FR-019 结构落审计。
+- **HIGH_RISK 审批洪水尝试**：同一用户在既有 HIGH_RISK Task 仍 `pending_approval` 时再次投递任何 HIGH_RISK 事件 —— 内核 MUST 按 FR-025 第二条拒绝新事件并回 `rejected(reason=rate_limited, dimension=user_highrisk_concurrent)`，不得排队、不得触发第二次审批消息，避免审批通道被刷屏。
+- **内核崩溃 / 异常重启**：内核进程被 kill、OOM 或宿主机重启后再次启动 —— 新内核 MUST 在启动序列中扫描最近一次审计日志，将所有未见终态的 in-flight Task（`pending | dispatched | running | pending_approval`）补写为 `failed(reason=kernel_restart)` 事件，并为每个受影响 traceId 生成一份"中断汇总"推送给对应 userId（见 FR-028 / FR-029）。用户以**新 eventId** 重投原指令；复用旧 eventId MUST 被幂等层拒绝。
 
 ## Requirements *(mandatory)*
 
@@ -160,7 +172,7 @@ Alpha 用户对一个正在运行中的 traceId 投递"取消"指令，编排内
 **HIGH_RISK 审批门（对应 Constitution III）**
 
 - **FR-010**: 所有 `risk_level=HIGH_RISK` 的 Task 在分派前 MUST 进入 `pending_approval` 状态并通过来源通道向用户发起审批请求。
-- **FR-011**: 审批窗口期默认为 [NEEDS CLARIFICATION: 审批超时时长默认值未定——10 分钟、30 分钟、还是 2 小时？这直接影响用户体验与风险暴露时长]；超时 MUST 视为拒绝并落盘 `denied_by_timeout`。
+- **FR-011**: 审批窗口期默认为 **10 分钟**（自 `pending_approval` 进入该状态起计时）；超时 MUST 视为拒绝并落盘 `denied_by_timeout`。具体阈值可在部署配置中覆写，但 MVP 默认值保持 10 分钟。
 - **FR-012**: 用户回写 `approve <traceId>` / `deny <traceId>` MUST 以来源通道的消息形式接受；内核 MUST 按 `(userId, traceId)` 校验回写者身份，拒绝他人越权审批。
 
 **可取消性（对应 Constitution III）**
@@ -173,7 +185,12 @@ Alpha 用户对一个正在运行中的 traceId 投递"取消"指令，编排内
 
 - **FR-016**: 每个 Worker MUST 运行于独立进程（容器为可选增强，不作为 MVP 硬要求）；其崩溃不得影响主循环或其他 Worker。
 - **FR-017**: Worker MUST 受资源上限约束（内存、CPU、墙钟时间）；超限由内核强制终止并将对应 Task 置为 `failed(reason=sandbox_limit)`。
-- **FR-018**: 系统 MUST 为每次任务分派设置默认的 [NEEDS CLARIFICATION: 每任务的预算上限默认值未定——wall-clock 秒数、tool-call 次数、token 消耗上限各是多少？这是成本控制与滥用防御的关键默认值]；超限视同资源超限处理。
+- **FR-018**: 每次任务分派 MUST 受三维预算约束（`wall_clock_ms`、`max_tool_calls`、`max_tokens`）。预算值来源优先级：
+  1. Worker 在注册时为该 capability 声明的预算；
+  2. 未声明则 fallback 到**保守默认**：`wall_clock_ms=60_000` / `max_tool_calls=10` / `max_tokens=20_000`；
+  3. 任何声明或 fallback 值 MUST NOT 超过**系统硬顶**：`wall_clock_ms=1_800_000` / `max_tool_calls=200` / `max_tokens=500_000`，超硬顶的声明 MUST 被注册阶段拒绝。
+
+  运行期任一维度超限由内核终止该 Task，置 `failed(reason=budget_exceeded, dim=<wall|tool|token>)`，并按 FR-017 的沙箱超限路径处理。
 
 **审计与可观测（对应 Constitution IV）**
 
@@ -190,6 +207,36 @@ Alpha 用户对一个正在运行中的 traceId 投递"取消"指令，编排内
 
 - **FR-024**: 入口事件、Task 树消息、Worker 注册消息、审批消息、取消消息的 schema MUST 在 plan 阶段以机器可校验格式先行定义；实现代码只允许消费已定义的 schema。
 
+**速率限制与并发控制（对应 Constitution II / III 的滥用防御）**
+
+- **FR-025**: 每个 capability MUST 在注册信息中明确其 `risk_level`（`NORMAL` | `HIGH_RISK`），并据此适用不同的并发规则：
+  - `NORMAL`：同一用户并发活跃 trace（状态为 `pending | dispatched | running | pending_approval` 之和）MUST ≤ 10；
+  - `HIGH_RISK`：同一用户"未决 / 运行中 HIGH_RISK Task"数量 MUST ≤ 1（新 HIGH_RISK 事件 MUST 在既有 HIGH_RISK Task 结束前被拒绝）。
+- **FR-026**: 入口层 MUST 执行双层速率限制：
+  - 全局入口吞吐峰值 MUST ≤ 50 events/sec（含所有用户、所有来源通道汇总）；
+  - 每用户入口事件速率 MUST ≤ 120 events/min。
+  以上阈值在部署配置中可覆写，但覆写值不得高于系统硬顶（全局 ≤ 500 events/sec、每用户 ≤ 1200 events/min）。
+- **FR-027**: 任一种类超限 MUST 返回 `rejected(reason=rate_limited, dimension=<global_rps|user_rpm|user_concurrent|user_highrisk_concurrent>)`，MUST 不入 Task 队列、MUST 不触发 Task 创建，并 MUST 在审计日志中按 FR-019 的结构完整落盘（含 traceId-less `rejection_event`）。
+
+**崩溃恢复与结果回推（对应 Constitution III / IV / VI）**
+
+- **FR-028**: 内核状态以"内存为工作态、审计日志为事实来源"的两层模型组织，MUST NOT 假设 Task 状态跨进程持久化。内核启动时 MUST 执行一次"审计扫描"：
+  1. 读取最近一次运行的审计日志尾段；
+  2. 对所有已出现 `pending | dispatched | running | pending_approval` 但**未出现终态**的 Task，补写一条 `failed(reason=kernel_restart)` 审计事件；
+  3. 扫描完成前 MUST 拒绝一切入口事件，回 `rejected(reason=kernel_warming_up)`。
+- **FR-029**: 对每个 trace 的**终态**（`succeeded | failed | cancelled | denied | denied_by_timeout` 中的任一），内核 MUST 主动经**原来源通道**向发号者推送一条"结果汇总消息"，至少包含：
+  - `traceId`、原 `eventId`、用户自然语言指令摘要；
+  - 每个叶 Task 的 `taskId`、`capability`、最终 `outcome`、失败原因（如有）；
+  - 本 trace 的整体结论（全部成功 / 部分失败 / 整体失败 / 被取消 / 被拒绝）；
+  - 对 `failed(reason=kernel_restart)` 的 trace，MUST 在结论中显式说明"系统中断，原指令未完成，请以新指令重投"。
+
+  该推送 MUST 受 FR-020 的敏感字段脱敏规则约束；推送失败（通道不可达）MUST 至少重试 3 次（指数退避），全失败后 MUST 在审计日志中落盘 `notification_delivery_failed`，但 MUST NOT 重写 Task 终态。
+- **FR-030**: 用户 MUST NOT 被要求通过轮询拿结果；对任一 trace，"事件入队 → 终态回推"的可观测闭环由内核负责维护。CLI / 本地 HTTP 入口在 MVP 下 MUST 至少提供一种与推送一致的结果展示（例如进程前台打印 / webhook 回调），实现形式由 plan 决定。
+
+**Payload 大小与入口健壮性**
+
+- **FR-031**: 入口事件 `text` 字段默认上限 MUST 为 **16 KB**（UTF-8 编码字节数）；超限 MUST 在校验阶段立即拒绝并回 `rejected(reason=payload_too_large, limit=16KB, actual=<bytes>)`，MUST NOT 触发任何 Task 创建或 LLM 调用。阈值 MUST 在部署配置中可覆写，但覆写值 MUST ≤ 系统硬顶 **1 MB**，超硬顶的配置 MUST 在内核启动时被拒绝。该校验 MUST 先于 FR-001 的其他字段校验执行，以防恶意超大 payload 耗尽校验资源。
+
 ### Key Entities
 
 - **Entry Event (入口事件)**：来自外部通道的单条指令请求，携带幂等键、用户身份、原始文本、来源通道、时间戳。
@@ -199,6 +246,8 @@ Alpha 用户对一个正在运行中的 traceId 投递"取消"指令，编排内
 - **Approval Request (审批请求)**：针对 HIGH_RISK Task 在分派前产生的待决项，绑定 traceId + userId，具有默认超时窗口。
 - **Audit Event (审计事件)**：任一状态变更、派发、结果、审批、取消、崩溃的结构化记录，作为可回放的系统事实来源。
 - **Trace**：一次用户意图的完整执行链，由 traceId 聚合事件；一条入口事件对应一个 trace。
+- **Result Summary (结果汇总消息)**：对一个 trace 终态的用户可读汇总，绑定 traceId + 原 eventId + userId，经来源通道主动回推；生成时机为 trace 终态事件落审计日志后，内容服从 FR-020 的脱敏规则。
+- **Result Summary Notification (结果汇总消息)**：trace 到达任一终态后，由内核主动向来源通道推送的结构化汇总，聚合本 trace 下所有叶 Task 的 outcome，是用户获取结果的首选路径（用户不依赖轮询）。
 
 ## Success Criteria *(mandatory)*
 
@@ -212,6 +261,11 @@ Alpha 用户对一个正在运行中的 traceId 投递"取消"指令，编排内
 - **SC-006**: 任意 traceId 可在 ≤ 5 秒内从审计日志完整回放；sample 抽查 20 条 trace，100% 字段齐全且无明文敏感数据。
 - **SC-007**: HIGH_RISK Task 在未明确批准的前提下被分派的次数 = 0（以审计日志为准，覆盖 approve / deny / timeout 三分支各 ≥ 5 次实验）。
 - **SC-008**: 对"审计日志磁盘不可写"的故障注入，内核 MUST 在 10 秒内转为"拒绝新入口事件"状态，且不丢任何已收事件的既有审计链。
+- **SC-009**: 对"内核重启"的故障注入（在 3 条 in-flight trace 运行中 kill 主进程），重启后 ≤ 10 秒内：全部 3 条 trace 的审计日志补齐 `failed(reason=kernel_restart)` 终态，且对应结果汇总消息全部经来源通道投递成功（含 ≤ 3 次重试路径），发号者无需手动查询即可获知中断事实。
+- **SC-010**: 所有 trace 终态的结果汇总消息首次投递成功率 ≥ 99%，重试后累计投递成功率 = 100%；样本不少于 50 条 trace。
+- **SC-011**: 注入 100 条超大 payload（32 KB ~ 2 MB 各量级各 20 条）的入口事件，全部 MUST 在入口接收后 ≤ 50 ms 内被拒绝并落审计，Task 队列长度增量 = 0，内核 CPU / 内存占用无异常尖峰。
+- **SC-009**: 对"内核进程中途 kill"的故障注入，重启后 ≤ 10 秒内完成审计扫描；所有 in-flight trace MUST 在重启后 ≤ 30 秒内收到 `failed(reason=kernel_restart)` 的结果汇总推送，推送送达率（含 3 次重试后）≥ 99%；失败的推送 100% 在审计日志中留有 `notification_delivery_failed` 记录。
+- **SC-010**: 对任一 trace 的终态，来源通道收到的结果汇总 MUST 与审计日志按 traceId 重放出的终态 100% 一致；sample 抽查 50 条 trace 无漂移。
 
 ## Assumptions
 
