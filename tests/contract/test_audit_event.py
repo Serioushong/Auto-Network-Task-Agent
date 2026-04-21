@@ -12,8 +12,9 @@ Covers:
 from __future__ import annotations
 
 import pytest
-from orchestrator_kernel.contracts.audit import AuditEvent
 from pydantic import ValidationError
+
+from orchestrator_kernel.contracts.audit import AuditEvent
 
 from ._common import assert_json_schema_accepts, assert_json_schema_rejects, load_schema
 
@@ -105,7 +106,8 @@ class TestActorPattern:
             "worker:echo-worker-01",
             "worker:a",
             "user:alice",
-            "user:alice@local",
+            "user:alice.local",
+            "user:alice_local",
             "worker:a" + "b" * 127,  # 128 chars total after "worker:"
         ],
     )
