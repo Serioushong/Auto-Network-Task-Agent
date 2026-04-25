@@ -10,4 +10,4 @@ services:
       FEISHU_APP_ID: cli_a966c1b97a789ccc
       FEISHU_APP_SECRET: epF0rM8mtw0UxojoPGpLedKZYXCsp26b
     command: >
-      python -m orchestrator_kernel.entrypoints.feishu_sdk
+      uv run python -m orchestrator_kernel.entrypoints.feishu_sdk
