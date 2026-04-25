@@ -29,6 +29,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
@@ -185,6 +186,7 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
     async def _process_request(request: Request) -> JSONResponse:
         raw_body = await request.body()
         headers_snapshot = {k: v for k, v in request.headers.items()}
+        print(f"[feishu_webhook_request] path={request.url.path} body={raw_body.decode('utf-8', errors='replace')} headers={headers_snapshot}", flush=True)
         logger.info(
             "feishu_webhook_request received path=%s body=%s headers=%s",
             request.url.path,
@@ -194,6 +196,7 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
         try:
             payload = json.loads(raw_body.decode("utf-8") or "{}")
         except json.JSONDecodeError as exc:
+            print(f"[feishu_webhook_request] invalid_json path={request.url.path} body={raw_body!r}", flush=True)
             logger.warning("feishu_webhook_request invalid_json path=%s", request.url.path)
             raise HTTPException(status_code=400, detail="invalid json body") from exc
         if isinstance(payload, dict):
@@ -203,6 +206,7 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
             elif isinstance(payload.get("challenge"), str):
                 challenge = payload["challenge"]
             if challenge is not None:
+                print(f"[feishu_webhook_request] challenge_echo path={request.url.path} challenge={challenge}", flush=True)
                 logger.info("feishu_webhook_request challenge_echo path=%s", request.url.path)
                 return JSONResponse(content={"CHALLENGE": challenge})
         _verify_webhook(
