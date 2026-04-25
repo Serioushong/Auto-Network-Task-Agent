@@ -121,7 +121,7 @@ def _verify_webhook(
     expected_token = os.environ.get("FEISHU_VERIFICATION_TOKEN") or os.environ.get(
         "FEISHU_WEBHOOK_VERIFICATION_TOKEN"
     ) or None
-    expected_secret = os.environ.get("FEISHU_ENCRYPT_KEY") or os.environ.get(
+    encrypt_key = os.environ.get("FEISHU_ENCRYPT_KEY") or os.environ.get(
         "FEISHU_WEBHOOK_APP_SECRET"
     ) or None
     stub_token = os.environ.get("FEISHU_STUB_TOKEN") or None
@@ -133,13 +133,11 @@ def _verify_webhook(
         if not _constant_time_eq(token_header, stub_token):
             raise HTTPException(status_code=401, detail="invalid stub token")
 
-    if expected_secret:
+    if encrypt_key:
         if not (signature_header and timestamp_header and nonce_header):
             raise HTTPException(status_code=401, detail="missing signature headers")
-        canonical = f"{timestamp_header}\n{nonce_header}\n".encode("utf-8") + body
-        digest = hmac.new(expected_secret.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
-        expected_sig = f"v1={digest}"
-        if not _constant_time_eq(signature_header, expected_sig):
+        digest = hashlib.sha256((timestamp_header + nonce_header + encrypt_key).encode("utf-8") + body).hexdigest()
+        if not _constant_time_eq(signature_header, digest):
             raise HTTPException(status_code=401, detail="invalid webhook signature")
 
 

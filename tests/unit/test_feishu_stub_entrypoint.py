@@ -85,9 +85,9 @@ def test_feishu_signature_guard_accepts_valid_signature() -> None:
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     timestamp = "1710000000"
     nonce = "nonce-123"
-    digest = hmac.new(secret.encode("utf-8"), f"{timestamp}\n{nonce}\n".encode("utf-8") + body, hashlib.sha256).hexdigest()
+    digest = hashlib.sha256((timestamp + nonce + secret).encode("utf-8") + body).hexdigest()
     headers = {
-        "X-Lark-Signature": f"v1={digest}",
+        "X-Lark-Signature": digest,
         "X-Lark-Request-Timestamp": timestamp,
         "X-Lark-Request-Nonce": nonce,
         "Content-Type": "application/json",
