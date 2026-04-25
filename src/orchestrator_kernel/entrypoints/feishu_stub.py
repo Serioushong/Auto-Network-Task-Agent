@@ -21,11 +21,16 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+
+logger = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -180,13 +185,26 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
 
     async def _process_request(request: Request) -> JSONResponse:
         raw_body = await request.body()
+        headers_snapshot = {k: v for k, v in request.headers.items()}
+        logger.info(
+            "feishu_webhook_request received path=%s body=%s headers=%s",
+            request.url.path,
+            raw_body.decode("utf-8", errors="replace"),
+            headers_snapshot,
+        )
         try:
             payload = json.loads(raw_body.decode("utf-8") or "{}")
         except json.JSONDecodeError as exc:
+            logger.warning("feishu_webhook_request invalid_json path=%s", request.url.path)
             raise HTTPException(status_code=400, detail="invalid json body") from exc
         if isinstance(payload, dict):
-            challenge = payload.get("CHALLENGE") if isinstance(payload.get("CHALLENGE"), str) else payload.get("challenge") if isinstance(payload.get("challenge"), str) else None
+            challenge = None
+            if isinstance(payload.get("CHALLENGE"), str):
+                challenge = payload["CHALLENGE"]
+            elif isinstance(payload.get("challenge"), str):
+                challenge = payload["challenge"]
             if challenge is not None:
+                logger.info("feishu_webhook_request challenge_echo path=%s", request.url.path)
                 return JSONResponse(content={"CHALLENGE": challenge})
         _verify_webhook(
             body=raw_body,
