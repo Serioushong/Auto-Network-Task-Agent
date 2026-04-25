@@ -11,9 +11,10 @@ local MVP:
 It now also supports the minimal real webhook verification flow:
 - challenge echo on initial URL verification
 - optional verification token guard
-- optional HMAC-SHA256 signature guard
+- optional SHA256 signature guard
 - Feishu-style webhook payload extraction
 - encrypted payload decryption when ``encrypt`` is present
+- verbose request logging for debugging webhook payloads
 """
 
 from __future__ import annotations
@@ -28,10 +29,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from Crypto.Cipher import AES
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
-from Crypto.Cipher import AES
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -99,10 +100,13 @@ def _extract_payload_fields(payload: dict[str, Any]) -> dict[str, str | None]:
             "userId": payload.get("userId") if isinstance(payload.get("userId"), str) else None,
             "eventId": payload.get("eventId") if isinstance(payload.get("eventId"), str) else None,
         }
+
     event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
     sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
-    text = message.get("text") or message.get("content") or payload.get("text")
+    header = payload.get("header") if isinstance(payload.get("header"), dict) else {}
+
+    text = message.get("content") or message.get("text") or payload.get("text")
     if isinstance(text, str):
         try:
             parsed = json.loads(text)
@@ -110,13 +114,20 @@ def _extract_payload_fields(payload: dict[str, Any]) -> dict[str, str | None]:
                 text = parsed["text"]
         except json.JSONDecodeError:
             pass
-    user_id = (
-        sender.get("sender_id")
-        or sender.get("open_id")
-        or sender.get("union_id")
-        or payload.get("userId")
-    )
-    event_id = event.get("message_id") or event.get("event_id") or payload.get("eventId")
+
+    sender_id = sender.get("sender_id") if isinstance(sender.get("sender_id"), dict) else None
+    user_id = None
+    if isinstance(sender_id, dict):
+        user_id = sender_id.get("user_id") or sender_id.get("open_id") or sender_id.get("union_id")
+    else:
+        user_id = (
+            sender.get("sender_id")
+            or sender.get("open_id")
+            or sender.get("union_id")
+            or payload.get("userId")
+        )
+
+    event_id = header.get("event_id") or event.get("message_id") or event.get("event_id") or payload.get("eventId")
     return {
         "text": text if isinstance(text, str) else None,
         "userId": user_id if isinstance(user_id, str) else None,
@@ -224,7 +235,10 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
     async def _process_request(request: Request) -> JSONResponse:
         raw_body = await request.body()
         headers_snapshot = {k: v for k, v in request.headers.items()}
-        print(f"[feishu_webhook_request] path={request.url.path} body={raw_body.decode('utf-8', errors='replace')} headers={headers_snapshot}", flush=True)
+        print(
+            f"[feishu_webhook_request] path={request.url.path} body={raw_body.decode('utf-8', errors='replace')} headers={headers_snapshot}",
+            flush=True,
+        )
         logger.info(
             "feishu_webhook_request received path=%s body=%s headers=%s",
             request.url.path,
@@ -248,7 +262,10 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
             elif isinstance(payload.get("challenge"), str):
                 challenge = payload["challenge"]
             if challenge is not None:
-                print(f"[feishu_webhook_request] challenge_echo path={request.url.path} challenge={challenge}", flush=True)
+                print(
+                    f"[feishu_webhook_request] challenge_echo path={request.url.path} challenge={challenge}",
+                    flush=True,
+                )
                 logger.info("feishu_webhook_request challenge_echo path=%s", request.url.path)
                 return JSONResponse(content={"CHALLENGE": challenge})
 
