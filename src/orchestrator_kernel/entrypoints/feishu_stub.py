@@ -18,16 +18,47 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel, Field, ValidationError
+
+from ..contracts.phase10 import AgentCapability
+from ..kernel.dispatcher import Dispatcher, WorkerHandle
+from ..phase10_agent import AgentRegistry, MainAgentRouter, MainAgentRuntime
+from ..phase10_entrypoints import Phase10EntrypointAdapter
 
 
 class FeishuMessage(BaseModel):
     text: str = Field(min_length=1)
     userId: str = Field(min_length=1, max_length=128)
     eventId: str | None = Field(default=None, min_length=16, max_length=64)
+
+
+def _feishu_adapter(audit_dir: Path) -> Phase10EntrypointAdapter:
+    registry = AgentRegistry()
+    capability = AgentCapability.model_validate(
+        {
+            "agentId": "feishu-phase10-echo",
+            "capability": "echo.say",
+            "version": "1.0.0",
+            "riskLevel": "NORMAL",
+            "healthy": True,
+            "resourceLimits": {"memoryMb": 128, "cpuPct": 10, "wallClockMs": 60000},
+        }
+    )
+    registry.register(capability)
+    dispatcher = Dispatcher()
+    dispatcher.register(
+        WorkerHandle(
+            worker_id=capability.agentId,
+            capabilities=tuple(),
+            healthy=True,
+            metadata={"capability": capability.capability},
+        )
+    )
+    runtime = MainAgentRuntime(router=MainAgentRouter(dispatcher, registry))
+    return Phase10EntrypointAdapter(runtime)
 
 
 async def handle_message(
@@ -37,37 +68,23 @@ async def handle_message(
     event_id: str | None = None,
     audit_dir: Path = Path("var/audit"),
 ) -> dict[str, Any]:
-    """Submit a Feishu-shaped message through the existing kernel pipeline."""
-    from ..cli_main import assemble_kernel
-
-    harness = await assemble_kernel(audit_dir=audit_dir)
-    echo_script = (
-        Path(__file__).resolve().parents[2] / "workers_stub" / "echo_worker.py"
+    """Submit a Feishu-shaped message through the shared adapter path."""
+    adapter = _feishu_adapter(audit_dir)
+    result = adapter.submit(
+        text=text,
+        user_id=user_id,
+        event_id=event_id,
+        source_channel="feishu_stub",
     )
-    try:
-        await harness.register_worker(
-            SimpleNamespace(
-                script_path=echo_script,
-                expected_capabilities=("echo.say",),
-            )
-        )
-        result = await harness.submit(
-            text=text,
-            user_id=user_id,
-            event_id=event_id,
-            source_channel="feishu_stub",
-        )
-        return {
-            "traceId": result.traceId,
-            "eventId": result.eventId,
-            "traceOutcome": result.traceOutcome,
-            "leafOutcomes": list(result.leafOutcomes),
-            "audit_event_types": list(result.audit_event_types),
-            "duration_s": result.duration_s,
-            "message": result.message,
-        }
-    finally:
-        await harness.shutdown()
+    return {
+        "traceId": result.trace_id,
+        "eventId": result.event_id,
+        "traceOutcome": "feishu-dispatched",
+        "leafOutcomes": [],
+        "audit_event_types": [],
+        "duration_s": 0.0,
+        "message": result.selected_capability,
+    }
 
 
 async def handle_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -77,6 +94,23 @@ async def handle_payload(payload: dict[str, Any]) -> dict[str, Any]:
         user_id=message.userId,
         event_id=message.eventId,
     )
+
+
+def create_app(audit_dir: Path = Path("var/audit")) -> FastAPI:
+    app = FastAPI(title="Orchestrator Kernel Feishu Stub", version="0.1.0")
+
+    @app.get("/healthz")
+    async def healthz() -> dict[str, Any]:
+        return {"ready": True, "sourceChannel": "feishu_stub"}
+
+    @app.post("/feishu/submit")
+    async def submit(payload: dict[str, Any] = Body(...)) -> Any:
+        try:
+            return await handle_payload(payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail={"errors": exc.errors()}) from exc
+
+    return app
 
 
 def main() -> None:
@@ -94,4 +128,4 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["FeishuMessage", "handle_message", "handle_payload", "main"]
+__all__ = ["FeishuMessage", "create_app", "handle_message", "handle_payload", "main"]

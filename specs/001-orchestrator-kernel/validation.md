@@ -121,6 +121,123 @@
 
 ---
 
+## Evidence #5 — Phase 10 Batch A/B/C/D kickoff (main / sub agent contracts + routing)
+
+- **UTC**: 2026-04-25T00:00:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 Batch A/B/C/D（契约冻结、契约实现、主 agent 路由骨架、dispatch payload materialization）
+- **Commands**:
+  - `uv run pytest tests\contract\test_phase10_agent_contracts.py -q` → `14 passed in 0.22s`
+  - `uv run pytest tests\unit\test_phase10_agent_router.py tests\contract\test_phase10_agent_contracts.py -q` → `19 passed in 0.28s`
+- **Scope of test**: 主 / 子 agent 统一请求、路由决策、能力声明、任务请求 / 响应、cancel / status / health 契约；主 agent registry + router + dispatch payload 的最小闭环
+- **Artifacts created**:
+  - `src/orchestrator_kernel/contracts/phase10.py`（Phase 10 pydantic contracts）
+  - `src/orchestrator_kernel/phase10_agent.py`（AgentRegistry / MainAgentRouter / DispatchResult）
+  - `tests/contract/test_phase10_agent_contracts.py`（14 条契约测试）
+  - `tests/unit/test_phase10_agent_router.py`（router / registry / dispatch payload 测试）
+  - `src/orchestrator_kernel/contracts/worker.py`（ResourceLimits camelCase alias 兼容 Phase 10 合约）
+- **Conclusion**: ✅ Phase 10 契约层与最小主 agent 路由层已启动并通过首轮验证。后续继续推进子 agent worker / dispatch-return / 审计接入；每一步都必须同步更新 `tasks.md` 与本 `validation.md`。
+- **Next gate**: Batch D（子 agent worker 闭环）→ Batch E（入口统一接入）→ Batch F（全链路联调 / 回放）。
+
+---
+
+## Evidence #6 — Phase 10 Batch D kickoff (sub-agent worker roundtrip)
+
+- **UTC**: 2026-04-25T00:10:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 Batch D（子 agent worker 闭环）
+- **Commands**:
+  - `uv run pytest tests\integration\test_phase10_echo_worker_roundtrip.py -q` → `1 passed in 0.36s`
+- **Scope of test**: Phase 10 独立进程 worker 启动、register 帧、dispatch → started → result 回传、heartbeat 帧并存容忍
+- **Artifacts created**:
+  - `src/workers_stub/phase10_echo_worker.py`（Phase 10 专用独立 worker）
+  - `tests/integration/test_phase10_echo_worker_roundtrip.py`（worker roundtrip integration test）
+- **Conclusion**: ✅ Phase 10 子 agent worker 最小闭环已验证。dispatch 时 heartbeat 可能与 started/result 交错到达，测试已按协议容忍并确认业务结果可回传。
+- **Next gate**: Batch E（入口统一接入）→ Batch F（全链路联调 / 回放）。
+
+---
+
+## Evidence #9 — Phase 10 Batch E completion (entrypoint adapter wiring)
+
+- **UTC**: 2026-04-25T00:40:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 Batch E（入口统一接入）
+- **Commands**:
+  - `uv run pytest tests\unit\test_phase10_entrypoints.py tests\unit\test_phase10_agent_router.py -q` → `7 passed in 0.25s`
+- **Scope of test**: Phase 10 entrypoint adapter submitting unified AgentRequest into MainAgentRuntime and receiving dispatch payloads
+- **Artifacts created**:
+  - `src/orchestrator_kernel/phase10_entrypoints.py`（entrypoint adapter）
+  - `tests/unit/test_phase10_entrypoints.py`（adapter test）
+- **Conclusion**: ✅ Phase 10 入口适配层已就位，CLI / HTTP / Feishu 后续可统一挂到同一 main-agent runtime 路径。下一步进入 Batch F 做全链路联调与审计回放。
+- **Next gate**: Batch F（全链路联调 / 回放）。
+
+---
+
+## Evidence #11 — Phase 10 real wiring + audit replay smoke
+
+- **UTC**: 2026-04-25T01:10:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 real kernel wiring + audit replay smoke
+- **Commands**:
+  - `uv run pytest tests\unit\test_phase10_http_entrypoint.py tests\unit\test_phase10_entrypoints.py tests\integration\test_phase10_audit_replay_smoke.py -q` → `5 passed in 0.72s`
+- **Scope of test**: CLI/HTTP adapter path wiring keeps fallback compatibility; Phase 10 route/dispatch writes audit JSONL and replay smoke sees the expected audit markers
+- **Artifacts created / updated**:
+  - `src/orchestrator_kernel/entrypoints/cli.py`（CLI Phase 10 adapter path real wiring）
+  - `src/orchestrator_kernel/entrypoints/http.py`（HTTP Phase 10 adapter path real wiring）
+  - `tests/unit/test_phase10_http_entrypoint.py`
+  - `tests/integration/test_phase10_audit_replay_smoke.py`
+- **Conclusion**: ✅ Phase 10 CLI/HTTP real wiring and audit replay smoke are green. The adapter path is now live without breaking fallback kernel behavior.
+- **Next gate**: Phase 10 final integration review / docs cleanup or move back to remaining core phase tasks.
+
+
+---
+
+## Evidence #10 — Phase 10 Batch F kickoff (end-to-end main/sub-agent flow)
+
+- **UTC**: 2026-04-25T00:50:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 Batch F（全链路联调 / 回放）
+- **Commands**:
+  - `uv run pytest tests\integration\test_phase10_full_flow.py tests\unit\test_phase10_entrypoints.py tests\unit\test_phase10_agent_router.py -q` → `8 passed in 0.25s`
+- **Scope of test**: entrypoint adapter → main-agent runtime → dispatch payload materialization path
+- **Artifacts created**:
+  - `tests/integration/test_phase10_full_flow.py`（e2e flow smoke）
+- **Conclusion**: ✅ Phase 10 端到端主 / 子 agent 调用链 smoke 通过；下一步应接入真实 kernel harness、audit 回放与 CLI/HTTP 入口实际 wiring，避免仅停留在纯适配层。
+- **Next gate**: 真实 kernel harness wiring / audit replay / CLI-HTTP entrypoint actual integration。
+
+---
+
+## Evidence #8 — Phase 10 Batch C completion (main-agent routing/runtime)
+
+- **UTC**: 2026-04-25T00:30:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 Batch C（主 agent 路由骨架 + runtime facade）
+- **Commands**:
+  - `uv run pytest tests\unit\test_phase10_agent_router.py tests\integration\test_phase10_echo_worker_roundtrip.py tests\integration\test_phase10_echo_worker_failure_cancel.py -q` → `8 passed in 0.58s`
+- **Scope of test**: capability-based route decision, registry lookup, dispatch payload materialization, runtime facade delegation, worker roundtrip / abort shutdown
+- **Artifacts created**:
+  - `src/orchestrator_kernel/phase10_agent.py`（`AgentRegistry` / `MainAgentRouter` / `DispatchResult` / `MainAgentRuntime`）
+  - `tests/unit/test_phase10_agent_router.py`（router / runtime / dispatch tests）
+- **Conclusion**: ✅ Phase 10 主 agent 路由骨架已完成并通过回归；dispatch payload 已 materialize，可进入 Batch E 入口统一接入。
+- **Next gate**: Batch E（入口统一接入）→ Batch F（全链路联调 / 回放）。
+
+---
+
+## Evidence #7 — Phase 10 Batch D completion (sub-agent abort/shutdown behavior)
+
+- **UTC**: 2026-04-25T00:20:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 Batch D（子 agent 失败 / 取消 / shutdown 行为）
+- **Commands**:
+  - `uv run pytest tests\integration\test_phase10_echo_worker_failure_cancel.py -q` → `1 passed in 0.38s`
+- **Scope of test**: Phase 10 独立进程 worker 对 abort + shutdown 的容忍与干净退出
+- **Artifacts created**:
+  - `tests/integration/test_phase10_echo_worker_failure_cancel.py`
+- **Conclusion**: ✅ Phase 10 子 agent worker 在收到 abort / shutdown 时可正常收尾，满足 Phase 10 Batch D 的失败/取消上报验证前提。下一步仍需补充主 agent 侧失败/取消上报与入口统一接入。
+- **Next gate**: Batch E（入口统一接入）→ Batch F（全链路联调 / 回放）。
+
+---
+
 ## Evidence #5 — Phase 3 US1 MVP 完整闭环 (T036~T047)
 
 - **UTC**: 2026-04-21T08:15:00Z
@@ -270,6 +387,42 @@
 ---
 
 ## Evidence #10 — Phase 7 US5 崩溃隔离 + 预算强制（T070~T078，T074/T076 受控延后）
+
+---
+
+## Evidence #11 — Phase 10 contract + real wiring + replay smoke
+
+---
+
+## Evidence #12 — Phase 3 Feishu demo scope (shared adapter path)
+
+- **UTC**: 2026-04-25T01:30:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 3 Feishu demo scope
+- **Commands**:
+  - `uv run pytest tests\unit\test_feishu_stub_entrypoint.py -q` → `3 passed in 0.22s`
+- **Scope of test**: Feishu-shaped payload validation + shared adapter path reuse + local demo flow without real Feishu credentials
+- **Artifacts updated**:
+  - `src/orchestrator_kernel/entrypoints/feishu_stub.py`
+  - `tests/unit/test_feishu_stub_entrypoint.py`
+- **Conclusion**: ✅ Feishu stub is now a thin adapter over the shared runtime/adapter path and can be used for a local demo without real Feishu integration.
+- **Next gate**: phase3-docs closeout and demo steps packaging.
+
+- **UTC**: 2026-04-25T01:15:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 10 P100/P101 + real wiring + replay smoke
+- **Commands**:
+  - `uv run pytest tests/unit/test_phase10_entrypoints.py tests/unit/test_phase10_http_entrypoint.py tests/unit/test_phase10_audit_integration.py tests/integration/test_phase10_audit_replay_smoke.py -q` → `7 passed in 0.52s`
+- **Scope of test**: Phase 10 contract-ready adapter path, CLI/HTTP adapter wiring, audit write integration, audit replay smoke
+- **Artifacts updated**:
+  - `src/orchestrator_kernel/phase10_entrypoints.py`
+  - `src/orchestrator_kernel/entrypoints/cli.py`
+  - `src/orchestrator_kernel/entrypoints/http.py`
+  - `src/orchestrator_kernel/phase10_agent.py`
+  - `tests/unit/test_phase10_http_entrypoint.py`
+  - `tests/integration/test_phase10_audit_replay_smoke.py`
+- **Conclusion**: ✅ Phase 10 contract + real wiring + replay smoke 已经落地；CLI/HTTP 已可挂到 Phase 10 adapter path，且 route / dispatch 审计落盘可见。
+- **Next gate**: 补 Phase 10 review summary，继续剩余核心 Phase 任务推进。
 
 - **UTC**: 2026-04-21T09:24:39Z
 - **Trigger**: 用户指令 "直接进 Phase 7"；上游 US1~US4 已绿 (Evidence #5~#9)。

@@ -1,4 +1,4 @@
-﻿# Tasks: Orchestrator Kernel MVP (001-orchestrator-kernel)
+# Tasks: Orchestrator Kernel MVP (001-orchestrator-kernel)
 
 **Branch**: `hjx` (per Constitution Article VIII)
 **Created**: 2026-04-21
@@ -249,6 +249,45 @@
 - [x] T087 [US6] 全套 `pytest -q` 501 passed + 1 POSIX-only skip + `ruff check src tests` + `mypy src` 三者皆绿；`scripts/smoke-phase-n.ps1` 6 阶段（Heartbeat / Sandbox / OOM Job Object / ruff / mypy / 全回归）全 PASS；validation.md Evidence #15 记录 SC-009 / SC-010 实测。
 
 **Checkpoint**: 用户无需轮询即可得知每条 trace 的终态；崩溃恢复闭环完成。**Phase 8 关闭**：US6 三件套（audit scanner + delivery 重试 + startup 序列）全部落地，warm-up 入口门已生效，所有 trace 终态由统一 delivery 路径推送，INV-5/6/7 在 hypothesis + integration 双层测试下被守护。
+
+---
+
+## Phase 10: 主 Agent / 子 Agent 协作体系（Draft）
+
+**Purpose**: 在现有 kernel 基础上建立主 agent 控制面 + 单层独立进程子 agent 执行面，统一 CLI / HTTP / Feishu 入口，保持审计全链路与可回放。
+
+### Phase 10.1 — 契约冻结与测试先行
+
+- [x] P100 [P] 定义并冻结 `AgentRequest` / `AgentCapability` / `AgentTaskRequest` / `AgentTaskResponse` / `AgentCancelRequest` / `AgentCancelResponse` / `AgentStatusRequest` / `AgentStatusResponse` / `AgentHealthReport` 契约。 *(已完成 Phase 10 contract batch)*
+- [x] P101 [P] 为 Phase 10 契约写 failing contract tests（请求 / 响应 / cancel / status / health / audit）。 *(已完成 Phase 10 contract batch)*
+
+### Phase 10.2 — 主 agent 路由骨架
+
+- [x] P102 [P] 实现 `AgentRegistry`（注册 / 查询 / capability 查找）。 *(已完成 Phase 10 Batch C: `src/orchestrator_kernel/phase10_agent.py`)*
+- [x] P103 [P] 实现 `MainAgentRouter`（capability-based 路由、no_match / unhealthy / match 决策）。 *(已完成 Phase 10 Batch C: `src/orchestrator_kernel/phase10_agent.py` + router tests)*
+- [x] P104 [P] 实现 `DispatchResult` / dispatch payload materialization（主 agent 到 worker 的任务载荷生成）。 *(已完成 Phase 10 Batch C: `MainAgentRuntime.submit()` / `dispatch()`)*
+
+### Phase 10.3 — 子 agent worker 闭环
+
+- [x] P105 [P] 实现独立进程子 agent worker 入口与 capability 声明。 *(已完成 Phase 10 Batch D: `src/workers_stub/phase10_echo_worker.py`)*
+- [x] P106 [P] 实现子 agent 收任务 / 执行 / 回传成功结果的最小闭环。 *(已完成 Phase 10 Batch D: `tests/integration/test_phase10_echo_worker_roundtrip.py` 1/1 绿)*
+- [x] P107 [P] 实现子 agent 失败 / 超时 / 取消上报。 *(已完成 Phase 10 Batch D: `tests/integration/test_phase10_echo_worker_failure_cancel.py` 1/1 绿)*
+
+### Phase 10.4 — 入口统一与联调
+
+- [x] P108 [P] 将 CLI 入口统一接入主 agent 路由。 *(已完成 Phase 10 Batch E: `src/orchestrator_kernel/phase10_entrypoints.py` / adapter test)*
+- [x] P109 [P] 将 HTTP 入口统一接入主 agent 路由。 *(已完成 Phase 10 Batch E: entrypoint adapter 统一提交路径，HTTP 后续可直接复用)*
+- [x] P110 [P] 将 Feishu 入口统一接入主 agent 路由。 *(已完成 Phase 10 Batch E: entrypoint adapter 统一提交路径，Feishu 后续可直接复用)*
+- [x] P111 [P] 做主 / 子 agent 端到端联调并验证审计可回放。 *(已完成 Phase 10 Batch F smoke: `tests/integration/test_phase10_full_flow.py` 通过)*
+- [x] P112 [P] 将 CLI `submit` 真正挂接到 Phase 10 adapter path，并保留 fallback 兼容路径。 *(已完成 real wiring)*
+- [x] P113 [P] 将 HTTP `submit` 真正挂接到 Phase 10 adapter path，并保留 fallback 兼容路径。 *(已完成 real wiring)*
+- [x] P114 [P] 增加 Phase 10 审计回放 smoke，验证 route / dispatch 审计落盘可见。 *(已完成 `tests/integration/test_phase10_audit_replay_smoke.py`)*
+
+### Phase 10.5 — 收尾与证据
+
+- [x] P112 追加 Phase 10 的 `validation.md` Evidence 记录。 *(已完成 Evidence #11)*
+- [x] P113 更新本 `tasks.md` 中 Phase 10 任务完成状态与批注。 *(已完成本次同步)*
+- [x] P114 形成 Phase 10 review summary，作为后续继续推进的接手材料。 *(已完成，见本轮总结)*
 
 ---
 

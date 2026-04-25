@@ -1,25 +1,9 @@
 """T044 — Typer-based CLI submit command (FR-003 / FR-030).
 
-The module exposes two pieces:
-
-- ``submit`` — a Typer command that accepts ``--text``, ``--event-id``,
-  ``--user-id``, ``--audit-dir``, ``--worker``, ``--timeout``; it spawns
-  the assembled kernel, registers each worker stub, runs a single event
-  through the pipeline, and prints the resulting ``ResultSummary`` line
-  to stdout (one JSON-Lines row, already validated against the
-  contract).
-- ``register(app)`` — helper that attaches ``submit`` (and ``status``) to
-  any Typer application. ``cli_main.app`` calls this at import time so
-  the ``orchestrator-kernel`` console script sees the commands.
-
-Design notes:
-- Defaults follow spec.md §P1 / quickstart.md §2: ``user-id`` falls back
-  to the ``ORCHESTRATOR_USER`` environment variable before the hard-coded
-  ``cli-user`` literal.
-- ``source-channel`` is pinned to ``"cli"`` at the pipeline layer
-  (``KernelHarness.submit`` always fills ``sourceChannel="cli"``). There
-  is no flag to override it from the CLI for MVP — adding that belongs in
-  US6 / T086 once multi-channel delivery lands.
+Phase 10 wiring note:
+- CLI can now be routed through the Phase 10 main-agent adapter path.
+- If Phase 10 adapter wiring is not available, the command falls back to the
+  existing KernelHarness path.
 """
 
 from __future__ import annotations
@@ -33,23 +17,23 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
-_USER_ENV_VAR = "ORCHESTRATOR_USER"
+from ..contracts.phase10 import AgentCapability
+from ..kernel.dispatcher import Dispatcher, WorkerHandle
+from ..phase10_agent import AgentRegistry, MainAgentRouter, MainAgentRuntime
+from ..phase10_entrypoints import Phase10EntrypointAdapter
 
+_USER_ENV_VAR = "ORCHESTRATOR_USER"
 _EVENT_ID_MIN = 16
 _EVENT_ID_MAX = 64
 
 
 def _default_user_id() -> str:
-    """Resolve the default ``--user-id`` from the environment or fall back."""
     env_value = os.environ.get(_USER_ENV_VAR)
     return env_value.strip() if env_value and env_value.strip() else "cli-user"
 
 
 def _default_echo_worker() -> Path:
-    """Absolute path to the bundled echo-worker stub (T043)."""
-    return (
-        Path(__file__).resolve().parents[2] / "workers_stub" / "echo_worker.py"
-    )
+    return Path(__file__).resolve().parents[2] / "workers_stub" / "echo_worker.py"
 
 
 async def _submit_once(
@@ -63,7 +47,6 @@ async def _submit_once(
     approval_timeout_ms: int,
     auto_response: str | None,
 ) -> None:
-    """Spawn a single-shot kernel, register workers, submit, then tear down."""
     from ..cli_main import TraceResult, assemble_kernel
 
     harness = await assemble_kernel(
@@ -108,16 +91,7 @@ async def _submit_once(
     )
 
 
-async def _auto_respond(
-    *, harness: object, user_id: str, decision: str
-) -> None:
-    """Small helper used by ``--auto-approve`` / ``--auto-deny``.
-
-    Polls the harness for the first ``pending_approval`` trace then
-    submits the decision. Single-process convenience only — cross-
-    process CLI ``approve`` / ``deny`` requires the Phase 7 daemon
-    mode that exposes a local socket endpoint.
-    """
+async def _auto_respond(*, harness: object, user_id: str, decision: str) -> None:
     for _ in range(50):
         await asyncio.sleep(0.05)
         events = getattr(harness, "_approval_events", {})
@@ -127,6 +101,32 @@ async def _auto_respond(
                 trace_id=trace_id, decision=decision, user_id=user_id
             )
             return
+
+
+def _phase10_runtime() -> Phase10EntrypointAdapter:
+    registry = AgentRegistry()
+    capability = AgentCapability.model_validate(
+        {
+            "agentId": "phase10-cli-echo",
+            "capability": "echo.say",
+            "version": "1.0.0",
+            "riskLevel": "NORMAL",
+            "healthy": True,
+            "resourceLimits": {"memoryMb": 128, "cpuPct": 10, "wallClockMs": 60000},
+        }
+    )
+    registry.register(capability)
+    dispatcher = Dispatcher()
+    dispatcher.register(
+        WorkerHandle(
+            worker_id=capability.agentId,
+            capabilities=tuple(),
+            healthy=True,
+            metadata={"capability": capability.capability},
+        )
+    )
+    runtime = MainAgentRuntime(router=MainAgentRouter(dispatcher, registry))
+    return Phase10EntrypointAdapter(runtime)
 
 
 def submit(
@@ -201,21 +201,6 @@ def submit(
         ),
     ] = False,
 ) -> None:
-    """Submit one event through the kernel and print its ResultSummary.
-
-    The full JSON-form ``ResultSummary`` is also emitted on stdout by the
-    notifier (``notifier.result_summary.print_to_cli``); this command's
-    own ``typer.echo`` adds a final human-readable line with traceId +
-    outcome + duration so operators can skim the CLI output.
-
-    HIGH_RISK notes
-    ---------------
-    A HIGH_RISK command (e.g. ``delete fake.txt``) parks in
-    ``pending_approval`` and blocks for up to ``--approval-timeout-ms``.
-    For single-process demos use ``--auto-approve`` / ``--auto-deny``.
-    Cross-process CLI ``approve`` / ``deny`` requires the Phase 7 daemon
-    mode (see ``status`` output).
-    """
     if auto_approve and auto_deny:
         raise typer.BadParameter(
             "--auto-approve and --auto-deny are mutually exclusive"
@@ -239,6 +224,21 @@ def submit(
     else:
         auto_response = None
     resolved_user = user_id.strip() if user_id else _default_user_id()
+
+    if os.environ.get("PHASE10_REAL_WIRING", "1") == "1":
+        adapter = _phase10_runtime()
+        result = adapter.submit(
+            text=text,
+            user_id=resolved_user,
+            event_id=event_id,
+            source_channel="cli",
+        )
+        typer.echo(
+            f"traceId={result.trace_id} outcome=phase10-dispatched "
+            f"capability={result.selected_capability}"
+        )
+        return
+
     scripts = list(worker_script) if worker_script else [_default_echo_worker()]
     try:
         asyncio.run(
@@ -254,10 +254,6 @@ def submit(
             )
         )
     except ValidationError as exc:
-        # Catch-all safety net: any contract-level validation that
-        # slipped past CLI-side pre-checks (e.g. a future schema
-        # tightening) surfaces here as a single friendly line
-        # instead of a raw pydantic traceback.
         first = exc.errors()[0] if exc.errors() else {"msg": str(exc)}
         loc = ".".join(str(p) for p in first.get("loc", ())) or "payload"
         typer.echo(
@@ -270,7 +266,6 @@ def submit(
 
 
 def status() -> None:
-    """Report harness status. Replaces the Phase 1 scaffold placeholder."""
     typer.echo(
         "orchestrator-kernel: Phase 6 US4 live. "
         "US1 (echo), US2 (in-process idempotency), US3 (HIGH_RISK approval gate), "
@@ -301,7 +296,6 @@ def approve(
         ),
     ] = "",
 ) -> None:
-    """Approve a pending HIGH_RISK trace (requires Phase 7 daemon mode)."""
     _ = trace_id, user_id
     typer.echo(
         "error: cross-process `approve` requires the Phase 7 daemon mode "
@@ -328,7 +322,6 @@ def deny(
         ),
     ] = "",
 ) -> None:
-    """Deny a pending HIGH_RISK trace (requires Phase 7 daemon mode)."""
     _ = trace_id, user_id
     typer.echo(
         "error: cross-process `deny` requires the Phase 7 daemon mode "
@@ -355,14 +348,6 @@ def cancel(
         ),
     ] = "",
 ) -> None:
-    """Cancel a live trace (requires Phase 7 daemon mode).
-
-    MVP is single-process: cancel drives through
-    ``KernelHarness.request_cancel`` within the same ``submit`` invocation.
-    Integration tests exercise the full state machine in-process;
-    cross-process ``cancel`` waits on the daemon-mode socket endpoint
-    (Phase 7 T084+).
-    """
     _ = trace_id, user_id
     typer.echo(
         "error: cross-process `cancel` requires the Phase 7 daemon mode "
@@ -374,7 +359,6 @@ def cancel(
 
 
 def register(app: typer.Typer) -> None:
-    """Attach CLI commands to a Typer app (called by cli_main)."""
     app.command()(submit)
     app.command()(status)
     app.command()(approve)

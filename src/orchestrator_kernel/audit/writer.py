@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -69,7 +69,7 @@ class AuditWriter:
     ) -> None:
         self._dir = Path(directory)
         self._clock: Callable[[], datetime] = clock or (
-            lambda: datetime.now(tz=UTC)
+            lambda: datetime.now(tz=timezone.utc)
         )
         self._opener: OpenerProtocol = opener or DefaultOpener()
         self._healthy: bool = True
@@ -99,8 +99,8 @@ class AuditWriter:
     def _current_path(self) -> Path:
         now = self._clock()
         if now.tzinfo is None:
-            now = now.replace(tzinfo=UTC)
-        now_utc = now.astimezone(UTC)
+            now = now.replace(tzinfo=timezone.utc)
+        now_utc = now.astimezone(timezone.utc)
         return self._dir / f"audit-{now_utc.strftime('%Y-%m-%d')}.jsonl"
 
     def _transition_unhealthy(self, cause: OSError) -> None:
@@ -120,5 +120,5 @@ class AuditWriter:
     def _clock_iso(self) -> str:
         now = self._clock()
         if now.tzinfo is None:
-            now = now.replace(tzinfo=UTC)
-        return now.astimezone(UTC).isoformat()
+            now = now.replace(tzinfo=timezone.utc)
+        return now.astimezone(timezone.utc).isoformat()

@@ -33,11 +33,11 @@ class Capability(BaseModel):
 class ResourceLimits(BaseModel):
     """OS-level sandbox bounds enforced by kernel via Windows Job Object (FR-025)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    memory_mb: int = Field(ge=16, le=8_192)
-    cpu_pct: int = Field(ge=1, le=400)
-    wall_clock_ms: int = Field(ge=1, le=1_800_000)
+    memory_mb: int = Field(ge=16, le=8_192, alias="memoryMb")
+    cpu_pct: int = Field(ge=1, le=400, alias="cpuPct")
+    wall_clock_ms: int = Field(ge=1, le=1_800_000, alias="wallClockMs")
 
 
 class WorkerRegistration(BaseModel):

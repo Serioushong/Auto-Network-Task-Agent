@@ -1,0 +1,10 @@
+services:
+  feishu-stub:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      PYTHONPATH: /app/src
+    command: >
+      uv run uvicorn orchestrator_kernel.entrypoints.feishu_stub:create_app
+      --factory --host 0.0.0.0 --port 8001
