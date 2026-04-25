@@ -30,7 +30,6 @@ from fastapi import FastAPI, HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
