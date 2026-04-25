@@ -108,58 +108,115 @@ Get-Content .\var\audit\$(Get-Date -Format yyyy-MM-dd).jsonl | Select-Object -La
 
 ### 2.4 验证幂等
 
+> ⚠️ **Phase 6 MVP 限制**：`IdempotencyCache` 目前是 `KernelHarness` 实例内的内存态；
+> 每次 `orchestrator-kernel submit` 都会启动一个全新的子进程 → 全新 cache，
+> 因此"同一 eventId 跨多个 CLI 进程"无法命中 replay。**进程内幂等**（同一 KernelHarness
+> 收到两次 submit）已由 `tests/integration/test_p2_*` 17/17 绿灯覆盖；
+> **跨进程幂等**需要 Phase 7 T084 daemon mode 暴露本地 socket 端点，届时所有 CLI
+> 命令都会连到常驻守护进程共享同一个 cache。
+>
+> 下方命令目前会返回 **5 个不同的 traceId**，属于已知架构缺口；当 Phase 7 上线后，
+> 相同命令会按预期返回同一 traceId。
+
 ```powershell
-# 重复投递同 eventId 5 次
+# 进程内幂等（pytest 场景；见 tests/integration/test_p2_idempotency.py）
+# 跨进程演示 (等 Phase 7 daemon mode 上线后才会按预期命中 replay)
 1..5 | ForEach-Object {
-    orchestrator-kernel submit --event-id E-DEMO-1 --text "echo hello again"
+    orchestrator-kernel submit `
+        --event-id "01HYZDEMOSTABLE000000000XY" `
+        --text "echo hello again"
 }
 ```
 
-预期：5 次返回同一 traceId；审计里 4 条 `idempotent_replay=true`；stub echo Worker 只被调用 1 次。
+**event-id 格式约束**：长度必须在 16–64 字符之间（`EntryEvent.eventId` 契约，
+等同于 ULID-26 规格）；低于 16 字符 CLI 会以退出码 2 + 单行错误消息友好拒绝，
+不再抛出 pydantic traceback。省略 `--event-id` 时内核会自动为这次 submit 生成一个 ULID-26。
+
+预期（Phase 7 daemon mode 上线后）：5 次返回同一 traceId；审计里 4 条 `idempotent_replay=true`；stub echo Worker 只被调用 1 次。
 
 ---
 
 ## 3. 演练 —— HIGH_RISK 审批门 (P3)
 
+> ⚠️ **Phase 6 MVP 限制**：`approve` / `deny` 作为独立 CLI 子命令当前是 **stub**
+> （退出码 2 + 指向 Phase 7 daemon mode），原因同 §2.4 —— 跨进程无法触达内存中的
+> `ApprovalGate`。单进程端到端演练请使用下方 `--auto-approve` / `--auto-deny`
+> 标志；跨进程 `approve <traceId>` / `deny <traceId>` 将随 Phase 7 T084 daemon mode
+> 一起上线。
+
+### 3.a 单进程端到端：auto-approve / auto-deny（**推荐，已可跑**）
+
 ```powershell
-# 提交 HIGH_RISK 动作
-orchestrator-kernel submit --text "delete fake-file.txt"
+# 批准路径
+orchestrator-kernel submit `
+    --text "delete fake-file.txt" `
+    --worker src/workers_stub/danger_worker.py `
+    --auto-approve `
+    --approval-timeout-ms 3000
+# 预期: traceOutcome=all_succeeded, message="would-delete fake-file.txt"
+
+# 拒绝路径
+orchestrator-kernel submit `
+    --text "delete fake-file.txt" `
+    --worker src/workers_stub/danger_worker.py `
+    --auto-deny `
+    --approval-timeout-ms 3000
+# 预期: traceOutcome=denied, failureReason=user_rejected
+
+# 超时路径（400ms 窗口，不回应）
+orchestrator-kernel submit `
+    --text "delete fake-file.txt" `
+    --worker src/workers_stub/danger_worker.py `
+    --approval-timeout-ms 400
+# 预期: traceOutcome=denied, leafOutcome=denied_by_timeout,
+#        failureReason=approval_timeout, duration≈0.4s
 ```
 
-预期：
-- CLI 前台收到 `approval_request` 消息，包含 `traceId` 与 `expiresAt`（10 分钟后）；
-- Task 处于 `pending_approval`，**未**分派；
-- 审计出现 `task_pending_approval`。
+审计文件应出现：`task_pending_approval` → (auto-approve → `approval_granted` → `task_dispatched` → `task_succeeded`) 或 (auto-deny → `approval_denied` → leaf `denied`) 或 (超时 → `approval_timeout` → leaf `denied_by_timeout`)。
 
-三种分支：
+### 3.b 跨进程 approve/deny（**待 Phase 7 daemon mode**）
 
 ```powershell
-# (a) 批准
+# 这些命令当前是 stub，只会退出码 2 + 提示 Phase 7
 orchestrator-kernel approve <traceId>
-# 预期：approval_granted → task_dispatched → ... → task_succeeded
-
-# (b) 拒绝
 orchestrator-kernel deny <traceId>
-# 预期：approval_denied → task state = denied(user_rejected)
-
-# (c) 超时（等 10 分钟不响应）
-# 预期：approval_timeout → task state = denied_by_timeout → ResultSummary 投递
 ```
 
 ---
 
 ## 4. 演练 —— 一键取消 (P4)
 
+> ⚠️ **Phase 6 MVP 限制**：`orchestrator-kernel cancel <traceId>` 作为独立 CLI
+> 子命令当前同样是 stub（原因同 §3.b）。cancel 的完整状态机已完全落地，被
+> `tests/integration/test_p4_cancel.py` + `tests/integration/test_cancel_approval_race.py`
+> + `tests/unit/test_cancel_signal_escalation.py` 13/13 用例严格覆盖（FR-013 ≤ 5s
+> 刹车、FR-014 3s 软→1s 硬升级、重复 cancel、approve-vs-cancel 竞态）。
+> 跨进程 CLI cancel 将随 Phase 7 T084 daemon mode 一起上线。
+
+### 4.a 单进程 sleep 成功路径（当前可跑）
+
+```powershell
+# sleep 0.5 秒然后成功返回
+orchestrator-kernel submit `
+    --text "sleep 0.5" `
+    --worker src/workers_stub/sleep_worker.py
+# 预期: traceOutcome=all_succeeded, message="slept 0.50s", duration≈0.51s
+```
+
+### 4.b 跨进程 cancel（**待 Phase 7 daemon mode**）
+
 ```powershell
 # 触发一个慢动作
-orchestrator-kernel submit --text "sleep 30"
-# 记下返回的 traceId，立即：
+orchestrator-kernel submit `
+    --text "sleep 30" `
+    --worker src/workers_stub/sleep_worker.py
+# Phase 7 daemon mode 上线后，记下 traceId 然后立即：
 orchestrator-kernel cancel <traceId>
 ```
 
-预期：
+预期（Phase 7 daemon mode 上线后）：
 - ≤ 5 秒内 CLI 前台出现 `traceOutcome=cancelled` 的 ResultSummary；
-- 审计按序：`cancel_requested` → `soft_abort_sent` → （若 Worker 及时响应）`worker_terminated` → `task_cancelled`；
+- 审计按序：`cancel_requested` → `soft_abort_sent` → （若 Worker 及时响应）`task_cancelled`；
 - 若 Worker 不理会，3 秒后升级：`hard_abort_sent` → `task_cancelled(hard_terminated)`。
 
 ---

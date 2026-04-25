@@ -1,32 +1,15 @@
-"""T043 — Echo worker stub (US1 MVP).
+"""T058 — Danger worker stub (US3 HIGH_RISK capability).
 
-Standalone Python script launched by ``WorkerSupervisor.spawn`` as its own
-subprocess. It exchanges JSON-Lines frames with the kernel over stdin/stdout
-per ``contracts/worker-protocol.schema.json``.
+Declares the ``file.delete`` capability at ``HIGH_RISK`` so the
+kernel's approval gate must park every dispatch in
+``pending_approval`` (INV-3). The worker itself never touches disk:
+on dispatch it echoes back ``output.text = "would-delete <path>"`` —
+sufficient to prove the control-plane semantics without introducing
+actual filesystem effects to integration tests.
 
-Wire behaviour:
-
-1. On startup, emit one ``register`` frame declaring the capability
-   ``echo.say`` at ``NORMAL`` risk with the conservative default budget.
-2. For every ``dispatch`` frame received on stdin, respond within ~50 ms
-   with ``started`` followed by ``result(succeeded, output.text=payload.text)``.
-3. A ``shutdown`` frame causes a clean ``sys.exit(0)``.
-4. Any frame that fails JSON / schema validation is logged to stderr and
-   skipped — the parent process MUST survive malformed input (per
-   ``tests/integration/test_worker_stdio_roundtrip.py::test_worker_rejects_malformed_dispatch_gracefully``).
-
-Design notes:
-
-- Uses the binary stdio streams (``sys.stdin.buffer`` / ``sys.stdout.buffer``)
-  so we can enforce exact byte-level framing (``b"\\n"`` terminators, no
-  trailing whitespace) regardless of platform line-ending defaults.
-- Imports the same pydantic frame models the kernel uses so that, by
-  construction, every emitted frame already passes ``WorkerFrame``
-  validation — the contract test parses our stdout with the exact same
-  codec the kernel runs.
-- Does NOT open any files, sockets, threads, or subprocesses. A worker
-  stub that keeps the invariants simple lets the crash-isolation test
-  (T070) later prove real isolation by adding *explicit* misbehaviour.
+Wire behaviour is identical to ``echo_worker.py``: one register frame,
+then a streaming ``dispatch -> started -> result`` loop, closing on
+``shutdown``. Malformed JSON is logged to stderr and skipped.
 """
 
 from __future__ import annotations
@@ -39,7 +22,7 @@ from datetime import UTC, datetime
 
 from _heartbeat import start_heartbeat_thread  # noqa: E402 — sibling module (script mode)
 
-from orchestrator_kernel.contracts.budget import DEFAULT_BUDGET
+from orchestrator_kernel.contracts.budget import Budget
 from orchestrator_kernel.contracts.worker import (
     Capability,
     ResourceLimits,
@@ -51,9 +34,11 @@ from orchestrator_kernel.contracts.worker_protocol import (
     StartedFrame,
 )
 
-WORKER_ID_PREFIX = "echo-worker"
-CAPABILITY_NAME = "echo.say"
-_ENV_DISABLE_HEARTBEAT = "ECHO_WORKER_DISABLE_HEARTBEAT"
+WORKER_ID_PREFIX = "danger-worker"
+CAPABILITY_NAME = "file.delete"
+_DISABLE_HEARTBEAT_ENV = "DANGER_WORKER_DISABLE_HEARTBEAT"
+
+_DANGER_BUDGET = Budget(wall_clock_ms=5_000, max_tool_calls=1, max_tokens=1_000)
 
 _stdout_lock = threading.Lock()
 
@@ -63,9 +48,8 @@ def _now_utc() -> datetime:
 
 
 def _emit(frame_json: str) -> None:
-    """Write one frame + LF to stdout.buffer and flush. One line, UTF-8."""
     if "\n" in frame_json:
-        raise RuntimeError("echo-worker tried to emit embedded newline")
+        raise RuntimeError("danger-worker tried to emit embedded newline")
     with _stdout_lock:
         sys.stdout.buffer.write(frame_json.encode("utf-8") + b"\n")
         sys.stdout.buffer.flush()
@@ -73,37 +57,29 @@ def _emit(frame_json: str) -> None:
 
 def _log_stderr(msg: str) -> None:
     try:
-        sys.stderr.write(f"[echo-worker] {msg}\n")
+        sys.stderr.write(f"[danger-worker] {msg}\n")
         sys.stderr.flush()
-    except Exception:  # noqa: BLE001 — best-effort diagnostics, never crash
+    except Exception:  # noqa: BLE001
         pass
 
 
 def _build_register_frame() -> RegisterFrame:
     capability = Capability(
         name=CAPABILITY_NAME,
-        riskLevel="NORMAL",
-        budget=DEFAULT_BUDGET,
-        description="Echo a payload.text string back as output.text.",
+        riskLevel="HIGH_RISK",
+        budget=_DANGER_BUDGET,
+        description="Simulated file deletion; never touches the filesystem.",
     )
     registration = WorkerRegistration(
         workerId=f"{WORKER_ID_PREFIX}-{os.getpid()}",
         pid=os.getpid(),
         capabilities=[capability],
-        resourceLimits=ResourceLimits(memory_mb=128, cpu_pct=50, wall_clock_ms=60_000),
+        resourceLimits=ResourceLimits(memory_mb=128, cpu_pct=25, wall_clock_ms=10_000),
     )
     return RegisterFrame(kind="register", registration=registration)
 
 
 def _handle_dispatch(obj: dict[str, object]) -> None:
-    """Emit started + result frames for one dispatch payload.
-
-    Only the fields strictly required to satisfy
-    ``contracts/worker-protocol.schema.json`` are read from ``obj``; the
-    rest (``traceId``, ``capability``, ``budget``, ``deadline``) are
-    trusted because the kernel already validated them before writing to
-    our stdin.
-    """
     task_id = obj.get("taskId")
     payload = obj.get("payload") or {}
     if not isinstance(task_id, str):
@@ -112,8 +88,8 @@ def _handle_dispatch(obj: dict[str, object]) -> None:
     if not isinstance(payload, dict):
         payload = {}
 
-    text = payload.get("text")
-    echoed: str = text if isinstance(text, str) else ""
+    path = payload.get("path") or payload.get("text") or ""
+    blurb: str = path if isinstance(path, str) else ""
 
     started = StartedFrame(kind="started", taskId=task_id, startedAt=_now_utc())
     _emit(started.model_dump_json(exclude_none=True))
@@ -122,25 +98,24 @@ def _handle_dispatch(obj: dict[str, object]) -> None:
         kind="result",
         taskId=task_id,
         outcome="succeeded",
-        output={"text": echoed},
+        output={"text": f"would-delete {blurb}".rstrip()},
         finishedAt=_now_utc(),
     )
     _emit(result.model_dump_json(exclude_none=True))
 
 
 def main() -> int:
-    """Run the stdio read loop. Returns a POSIX-style exit code."""
     try:
         register = _build_register_frame()
         _emit(register.model_dump_json(exclude_none=True))
-    except Exception as exc:  # noqa: BLE001 — startup must never explode silently
+    except Exception as exc:  # noqa: BLE001
         _log_stderr(f"failed to emit register frame: {exc!r}")
         return 2
 
     start_heartbeat_thread(
         worker_id=register.registration.workerId,
         stdout_lock=_stdout_lock,
-        env_disable_key=_ENV_DISABLE_HEARTBEAT,
+        env_disable_key=_DISABLE_HEARTBEAT_ENV,
     )
 
     stdin = sys.stdin.buffer
@@ -167,7 +142,7 @@ def main() -> int:
         if kind == "dispatch":
             try:
                 _handle_dispatch(obj)
-            except Exception as exc:  # noqa: BLE001 — keep reader alive
+            except Exception as exc:  # noqa: BLE001
                 _log_stderr(f"dispatch handler error: {exc!r}")
         elif kind == "abort":
             continue

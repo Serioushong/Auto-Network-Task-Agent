@@ -163,16 +163,16 @@
 
 ### Tests for US3 (RED)
 
-- [ ] T055 [P] [US3] Write failing integration test `tests/integration/test_p3_approval_gate.py`：覆盖 spec.md P3 的 4 个 Acceptance Scenarios（approve、deny、timeout、越权 userId）。
-- [ ] T056 [P] [US3] Write failing unit test `tests/unit/test_approval_gate.py`：状态转换矩阵 + 到期计时精度（用 `anyio` 的虚拟时钟 / `freezegun`）。
+- [x] T055 [P] [US3] Write failing integration test `tests/integration/test_p3_approval_gate.py`：覆盖 spec.md P3 的 4 个 Acceptance Scenarios（pending_approval、approve、deny、timeout）+ impersonation 边界。
+- [x] T056 [P] [US3] Write failing unit test `tests/unit/test_approval_gate.py`：state guard（HIGH_RISK only / pending only）+ `handle_response` 五分支 + `sweep_expired` 到期计时 + `is_pending` 语义，12 条，使用可注入 clock 完全决定性。
 
 ### Implementation for US3 (GREEN)
 
-- [ ] T057 [US3] Implement approval gate in `src/orchestrator_kernel/kernel/approval_gate.py`：HIGH_RISK 叶 Task 进入 `pending_approval`，注册带 `expiresAt` 的 timer；暴露 `handle_response(ApprovalResponse)`；`approval_impersonation_rejected` / `approval_stale` 路径。
-- [ ] T058 [US3] Implement `danger-worker` stub in `src/workers_stub/danger_worker.py`：capability `file.delete` HIGH_RISK；收到 dispatch 后不真删除（echo 返回 "would-delete <path>"）。
-- [ ] T059 [US3] Add CLI `approve <traceId>` / `deny <traceId>` 子命令 in `src/orchestrator_kernel/entrypoints/cli.py`；构造 `ApprovalResponse` 并经同进程 channel 发回内核（MVP 单机，channel = 本地 socket 或共享内存队列，选前者）。
-- [ ] T060 [US3] Wire 审批超时 timer 与 CLI 出入通道；默认 10 分钟可通过 `--approval-timeout-ms` 覆写（config 层已在 T026 就位）。
-- [ ] T061 [US3] 跑 `pytest tests/integration/test_p3_* tests/unit/test_approval_gate.py -q` 全绿。
+- [x] T057 [US3] Implement approval gate in `src/orchestrator_kernel/kernel/approval_gate.py`：纯数据层 `ApprovalGate`（`register` / `handle_response` / `sweep_expired` / `is_pending` / `next_deadline`）；`ApprovalDecision` 枚举五分支；impersonation 不消费 pending slot；ApprovalStaleError 守双响应。
+- [x] T058 [US3] Implement `danger-worker` stub in `src/workers_stub/danger_worker.py`：capability `file.delete` HIGH_RISK；收到 dispatch 后 `output.text = "would-delete <path>"`（不落盘）。
+- [x] T059 [US3] CLI `approve` / `deny` 命令在 `entrypoints/cli.py` 挂壳（跨进程通信需 Phase 7 daemon mode，MVP 先友好退 2 并指向 `--auto-approve` / `--auto-deny`）；同进程 replay 通道由 `KernelHarness.submit_approval_response` 暴露，集成测试已消费。
+- [x] T060 [US3] `--approval-timeout-ms` 在 `submit` 命令就位（默认 600_000 ms=10 min，FR-011），经 `assemble_kernel(approval_timeout_ms=...)` 传到 `ApprovalGate.default_window_ms`；`--auto-approve` / `--auto-deny` 提供单进程端到端演练通道。
+- [x] T061 [US3] `pytest tests/integration/test_p3_* tests/unit/test_approval_gate.py -q` 17/17 绿；整套 446 绿。CLI smoke 三分支均端到端验证（auto-approve → all_succeeded "would-delete foo.txt"；auto-deny → denied/user_rejected；400ms 超时 → denied_by_timeout/approval_timeout）。
 
 **Checkpoint**: US1~US3 均独立可用；"敢不敢对外放"的门槛到位。
 
@@ -186,17 +186,17 @@
 
 ### Tests for US4 (RED)
 
-- [ ] T062 [P] [US4] Write failing integration test `tests/integration/test_p4_cancel.py`：覆盖 spec.md P4 的 3 个 Acceptance Scenarios + Edge Case"重复 cancel"。
-- [ ] T063 [P] [US4] Write failing unit test `tests/unit/test_cancel_signal_escalation.py`：mock subprocess + 计时；断言 0/3/4 秒三级升级时序。
-- [ ] T064 [P] [US4] Write failing integration test `tests/integration/test_cancel_approval_race.py`：approve 与 cancel 并发；断言"最后到达者胜"（spec.md Edge Case）。
+- [x] T062 [P] [US4] Write failing integration test `tests/integration/test_p4_cancel.py` — 4 用例覆盖 P4 三个 Acceptance Scenarios + "重复 cancel" Edge Case；RED 阶段 `ModuleNotFoundError: orchestrator_kernel.kernel.cancel`。
+- [x] T063 [P] [US4] Write failing unit test `tests/unit/test_cancel_signal_escalation.py` — 7 用例（obedient soft-exit / stubborn terminate / fully-stubborn kill / already-terminal no-op / 阶段 IntEnum 顺序 / `TerminationResult` 形状 / 非 async `send_soft_signal` 拒绝）；使用本地 `_FakeProcess` 替代真实 subprocess。
+- [x] T064 [P] [US4] Write failing integration test `tests/integration/test_cancel_approval_race.py` — 2 用例覆盖 spec Edge Case "approval 与 cancel 竞态"：cancel-arrives-last-wins 与 approve-先入终态后-cancel 返回 `already_terminal/not_found`。
 
 ### Implementation for US4 (GREEN)
 
-- [ ] T065 [US4] Implement cancel orchestrator in `src/orchestrator_kernel/kernel/cancel.py`：`async def cancel_trace(traceId, userId) -> CancelResult`；广播 abort 帧 + 送 `CTRL_BREAK_EVENT`/`SIGTERM`；3 s 后 `terminate()` 升级，再 1 s `kill()`；不存在 / 已终态两分支单独审计。
-- [ ] T066 [US4] Implement `sleep-worker` stub in `src/workers_stub/sleep_worker.py`：capability `sleep.wait` NORMAL；payload 含 `seconds`；支持 `SIGBREAK` 捕获并优雅退出（用于"听话 Worker"分支）与一个"装死"开关（用于硬终止分支）。
-- [ ] T067 [US4] Add CLI `cancel <traceId>` 子命令；构造 `CancelMessage` 回注内核。
-- [ ] T068 [US4] Implement signal escalation in `src/orchestrator_kernel/worker_supervisor/lifecycle.py`：Windows 路径使用 `signal.CTRL_BREAK_EVENT` + `creationflags=CREATE_NEW_PROCESS_GROUP`；POSIX 使用 `SIGTERM`；通过 `await_event_with_timeout` 实现三级计时。
-- [ ] T069 [US4] 跑 `pytest tests/integration/test_p4_* tests/unit/test_cancel_* tests/integration/test_cancel_approval_race.py -q` 全绿。
+- [x] T065 [US4] Implement cancel orchestrator in `src/orchestrator_kernel/kernel/cancel.py` — 纯内存 `CancelManager`（register_trace / register_dispatch / unregister_task / mark_terminal / release / cancel_event / is_cancelled / request_cancel）+ `CancelStatus` enum（accepted / not_found / already_cancelled / already_terminal / impersonation_rejected）+ 不可变 `CancelOutcome` 数据类；无副作用，审计由 harness 统一写。
+- [x] T066 [US4] Implement `sleep-worker` stub in `src/workers_stub/sleep_worker.py` — capability `sleep.wait` NORMAL，`payload.seconds` 驱动睡眠；后台 stdin reader 监听 `abort` 帧，主线程以 50 ms 粒度轮询 abort/shutdown；`SLEEP_WORKER_IGNORE_ABORT=1` 触发"装死 worker"（只有 `kill()` 生效）。
+- [x] T067 [US4] Add CLI `cancel <traceId>` 子命令 — MVP 范围暂 stub（同 approve/deny 模式），输出 Phase 7 daemon 限制说明后 exit=2；`orchestrator-kernel status` 文案同步升级到 "Phase 6 US4 live"。
+- [x] T068 [US4] Implement signal escalation in `src/orchestrator_kernel/worker_supervisor/lifecycle.py` — 纯异步 `soft_abort_with_escalation(process, send_soft_signal, soft_timeout_s=3.0, hard_timeout_s=1.0) -> TerminationResult`；`EscalationStage.{already_terminal,soft,terminate,kill}` IntEnum 严格递增；依赖 `ProcessLike` Protocol（read-only `returncode` property）使单元测试可注入 `_FakeProcess`；`send_soft_signal` 非 `async def` 主动抛 `TypeError` 防止悄悄跳过软阶段。
+- [x] T069 [US4] `pytest tests/integration/test_p4_cancel.py tests/integration/test_cancel_approval_race.py tests/unit/test_cancel_signal_escalation.py -q` 全 13/13 绿；全量 `pytest -q` 459 通过（446 + 13 Phase 6 新增）。`ruff check src tests` 干净；`mypy src` 39 文件无错。
 
 **Checkpoint**: 用户"能刹车"；宪法 Article III 的行为表面可演示。
 
@@ -210,20 +210,20 @@
 
 ### Tests for US5 (RED)
 
-- [ ] T070 [P] [US5] Write failing integration test `tests/integration/test_p5_crash_isolation.py`：并行 3 条 trace，1 条 Worker 崩溃；断言 SC-005 + 内核 pid 不变；**并显式断言 INV-4**（活下来的两条 trace 的非终态 Task 全程存在于 `kernel.runtime_tasks` 集合中；崩溃的那条 Task 从 `runtime_tasks` 中被移除并仅保留终态审计事件）。
-- [ ] T071 [P] [US5] Write failing unit test `tests/unit/test_resource_monitor.py`：mock psutil；断言 500 ms 采样周期 + 超限立即转 `failed(sandbox_limit)`。
-- [ ] T072 [P] [US5] Write failing integration test `tests/integration/test_budget_exceeded.py`：Worker 故意超 `wall_clock_ms` budget；断言 `failed(budget_exceeded, dim=wall)`。
+- [x] T070 [P] [US5] Write failing integration test `tests/integration/test_p5_crash_isolation.py`：并行 3 条 trace，1 条 Worker 崩溃；断言 SC-005 + 内核 pid 不变；**并显式断言 INV-4**（所有 `task_dispatched` 有对应终态事件；崩溃那条仅剩 `task_failed(worker_crashed)`；所有 CancelManager 会话在 submit 返回后清零）。GREEN in Phase 7；通过 `pytest tests/integration/test_p5_crash_isolation.py -q`。
+- [x] T071 [P] [US5] Write failing unit test `tests/unit/test_resource_monitor.py`：mock `psutil.Process`；断言 `check_limits` 超 memory_mb 返回 `Violation`；`watch_worker` 按 `interval_s` 采样直至违规；进程消失时静默退出。GREEN in Phase 7。
+- [x] T072 [P] [US5] Write failing integration test `tests/integration/test_budget_exceeded.py`：budget-worker 注册 `wall_clock_ms=300` 的 `budget.burn`，dispatch 内睡 10 s 且无视 abort；断言 `task_failed(failureReason=budget_exceeded, failureDim=wall)` 且端到端 ≤ 5 s（FR-013）。GREEN in Phase 7。
 
 ### Implementation for US5 (GREEN)
 
-- [ ] T073 [US5] Implement resource monitor in `src/orchestrator_kernel/worker_supervisor/lifecycle.py`（扩展 T068 的模块）：psutil 每 500 ms 采样 rss/cpu；超 ResourceLimits 立即强终止并落 `sandbox_limit_hit` + `task_failed(sandbox_limit)`。
-- [ ] T074 [US5] Implement Windows Job Object binding in `src/orchestrator_kernel/worker_supervisor/supervisor.py`：使用 `ctypes` 调 `CreateJobObjectW` + `AssignProcessToJobObject` + `SetInformationJobObject(JobObjectExtendedLimitInformation)`；POSIX 下退化为 `resource.setrlimit` 或仅靠 psutil 软监控并记 warning。
-- [ ] T075 [US5] Implement `crash-worker` stub in `src/workers_stub/crash_worker.py`：capability `crash.oom`（不断 `bytearray`）+ `crash.raise`（`raise RuntimeError`）；两种均不接入 stdio 回传。
-- [ ] T076 [US5] Implement heartbeat / unhealthy 升级 in `lifecycle.py`：连续 3 次缺心跳 → `worker_unhealthy`；恢复 → `worker_recovered`；unhealthy Worker 被 dispatcher 跳过。
-- [ ] T077 [US5] Implement budget wall/tool/token 监控接入 dispatcher：每次 dispatch 注入 `deadline = dispatchedAt + budget.wall_clock_ms`；tool/token 由 Worker 自觉上报（MVP 仅占位）。
-- [ ] T078 [US5] 跑 `pytest tests/integration/test_p5_* tests/unit/test_resource_monitor.py tests/integration/test_budget_exceeded.py -q` 全绿。
+- [x] T073 [US5] Implement resource monitor in `src/orchestrator_kernel/worker_supervisor/lifecycle.py`（扩展 T068 的模块）：新增 `ResourceLimitsSnapshot` + `Violation` 数据类；`check_limits(pid, limits)` 使用 `psutil.Process` 采样 rss/cpu，捕 `NoSuchProcess/AccessDenied` 视为无违规；`watch_worker` 按 `interval_s` 循环采样直到违规或进程退出。注意：MVP 未接入 Harness 实时监控闭环（真实强终止路径由 T074 Job Object 接管，见 **MVP 缺口 A**），仅提供纯函数 + 协程给后续阶段复用；单元测试已证契约。
+- [x] T074 [US5] **Phase N.2 — MVP 缺口 A 已补齐；Phase N.3 / Evidence #14 追加真实内核级验证.** `worker_supervisor/supervisor.py` 实现：(1) Windows 下用 `ctypes.windll.kernel32` 调用 `CreateJobObjectW` → `SetInformationJobObject(JobObjectExtendedLimitInformation)`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` | `KILL_ON_JOB_CLOSE` | `DIE_ON_UNHANDLED_EXCEPTION`）→ `AssignProcessToJobObject`，handle 存入 `SupervisedWorker.metadata` 并在 `shutdown` 里 `CloseHandle`；(2) POSIX 下 `preexec_fn` 调 `resource.setrlimit(RLIMIT_AS, memory_mb * MiB)`。Kernel 侧接线：`KernelHarness.__init__` 新增 `resource_monitor_factory`，`register_worker` 为每个 Worker 起 `watch_worker` 协程，`Violation` 触发 `_on_sandbox_violation`（写 `sandbox_limit_hit` 审计 + `channel.frame_queue` 投错误信封唤醒 in-flight dispatch + `_tear_down_tainted_worker` 杀进程）；`_execute_leaf` 错误分支以 `_sandboxed_workers` 标志把 channel EOF 映射为 `failureReason="sandbox_limit"`。**Evidence #14 真实 OOM 验证额外补齐三个隐性 bug**：(a) ctypes 默认 `restype=c_int` 在 x64 把 HANDLE 截断到 32 bit → `_configure_kernel32_signatures` 显式固定 `HANDLE=c_void_p` 和其余 argtypes；(b) VSCode/WT 父 Job Object 让嵌套 job 的 `ProcessMemoryLimit` 静默失效 → spawn 默认附加 `CREATE_BREAKAWAY_FROM_JOB` + OSError fallback；(c) bind 必须发生在 asyncio 首次 `readline` 之前 → **两阶段绑定**：spawn 时预绑 `_DEFAULT_SPAWN_MEMORY_CEILING_MB=1024` 的宽松 Job Object，register 到达后 `bind_sandbox` 改走 `_update_job_memory_cap` 在既有 job 上 `SetInformationJobObject` 收紧到声明的 `memory_mb`，`cli_main.register_worker` 相应调用。新增单元 `tests/unit/test_supervisor_sandbox.py`（ctypes mock，3 条 Windows-only）+ `tests/unit/test_sandbox_wiring.py`（fake monitor factory 2 条）+ `tests/integration/test_job_object_oom.py`（`oom_blast_worker` + `ctypes.memset` 强制 commit 页面的真实 OOM，1 条，stderr 三层判据证明 Windows 内核 `TerminateProcess`；POSIX 自动 skip）；全量回归 481 passed / 1 skipped；`scripts/smoke-phase-n.ps1` 扩展为 6 阶段（+Phase N.3）。
+- [x] T075 [US5] Implement `crash-worker` stub in `src/workers_stub/crash_worker.py`：`crash.raise` 在 dispatch 时 emit started 后 `raise RuntimeError` 使进程崩溃；`crash.oom` 循环分配 16×16 MiB bytearray 作为受控 OOM 触发器（自带 256 MiB 上限防止误伤 CI 主机）；两者均经 `sys.exit` 关闭 stdout，kernel 侧通过 EOF → `RuntimeError` → `worker_crashed` 感知。附加 `src/workers_stub/budget_worker.py`：`budget.burn` 注册 300 ms wall budget 却睡 10 s 且忽略 abort，驱动 T072 预算路径。
+- [x] T076 [US5] **Phase N.1 — MVP 缺口 B 已补齐.** Heartbeat 闭环：(1) 新增 `src/workers_stub/_heartbeat.py` 共享守护线程，每 `interval_s` 持锁写 `HeartbeatFrame`，环境变量可关闭（用于测试失联场景）；echo / sleep / crash / budget / danger 五个 stub 全部接入，并新增 `silent_worker.py`（永不心跳）驱动 unhealthy 用例。(2) `worker_supervisor/lifecycle.py` 新增 `HeartbeatTracker`：`track/feed/untrack/stop`，单 `run()` 循环按 `interval_s` 比对最近 feed 时戳，超 `miss_threshold` 触发 `on_unhealthy(worker_id)`，恢复触发 `on_recovered`；回调支持 sync + async（`_maybe_await`）。(3) `cli_main.py` 重构 `_WorkerChannel`：后台 `_worker_reader_loop` 持续 drain stdout，`HeartbeatFrame` 直送 tracker、其余 frame 进 `frame_queue` 给 `_dispatch_and_await_result` 消费；解除旧版"只在 dispatch 时才读 stdout"的死结。(4) tracker 回调走 `Dispatcher.set_health(healthy=False|True)` + `worker_unhealthy` / `worker_recovered` 审计，与本轮 T074 的 `sandbox_limit_hit` 合称三种健康态审计。新增 `tests/unit/test_heartbeat_tracker.py`（fake clock 7 条）+ `tests/integration/test_worker_heartbeat.py`（silent_worker → unhealthy 1 条）；旧版 `tests/integration/test_worker_stdio_roundtrip.py` 的 `_read_one_frame` 透传跳过 heartbeat 兼容协议层测试。
+- [x] T077 [US5] 在 `_execute_leaf` 内接入 budget wall 强制：`wall_ms = min(task.budget.wall_clock_ms, capability.budget.wall_clock_ms)`；`effective_timeout = min(submit.timeout_s, wall_ms/1000)`；拆分 `TimeoutError → task_failed(budget_exceeded, failureDim=wall)` 与 `(ProtocolFrameError, RuntimeError, OSError) → task_failed(worker_crashed)` 两条分支；任一分支都调 `_tear_down_tainted_worker(worker_id)` 以防 stale frame 串扰下一次 dispatch（kill 进程 + `Dispatcher.unregister` + 移除 `_channels`）。tool/token 维度由 Worker 上报占位，留 Phase 9 接入。
+- [x] T078 [US5] 跑 `pytest tests/integration/test_p5_crash_isolation.py tests/integration/test_budget_exceeded.py tests/unit/test_resource_monitor.py -q` 全绿（3+2+2 = 7 个新用例）；全量回归 468 passed；`ruff check .` + `mypy src` 均通过。
 
-**Checkpoint**: 五条核心 user story 完结；系统具备 P1~P5 的运行韧性。
+**Checkpoint**: 五条核心 user story 完结；系统具备 P1~P5 的运行韧性。MVP 缺口 A (T074 Job Object + POSIX rlimit + sandbox wiring) 与 B (T076 Heartbeat + HeartbeatTracker) **已在 Phase N 三轮前置补齐**（见 validation.md Evidence #11 / #12 / #13 / #14），FR-014 / FR-025 现已全量落地 —— 且通过 Evidence #14 `oom_blast_worker` 端到端证明 Windows 内核在真实子进程里对 `memory_mb` 做 `TerminateProcess`，不再依赖 mock 侧信道。Phase 8 之后可直接进入崩溃恢复 + 结果回推。
 
 ---
 
@@ -235,20 +235,20 @@
 
 ### Tests for US6 (RED)
 
-- [ ] T079 [P] [US6] Write failing integration test `tests/integration/test_kernel_restart_recovery.py`：3 条 in-flight trace；`Stop-Process` 内核；重启；断言 ≤ 10 s 内三条 trace 均补写 `failed(kernel_restart)` + 对应 ResultSummary 经原通道投递成功；重启扫描期内 submit 收到 `rejected(kernel_warming_up)`。
-- [ ] T080 [P] [US6] Write failing integration test `tests/integration/test_result_notification.py`：50 条 trace 正常完成；断言首次投递成功率 ≥ 99%（用注入 1% 一次性抖动 mock）；重试后 100%；失败事件落 `notification_delivery_failed`。
-- [ ] T081 [P] [US6] Write failing unit test `tests/unit/test_audit_scanner.py`：给定人造 JSONL（含未终态 Task），scanner 能正确识别并补写终态事件；INV-5 / INV-6 属性测试。
+- [x] T079 [P] [US6] Write failing integration test `tests/integration/test_kernel_restart_recovery.py`：3 条 in-flight trace 通过预制 JSONL 注入；`assemble_kernel(audit_dir, warm_start=False)` → `await harness.startup(recovery_channel=...)`；断言 < 5 s wall-clock（远低于 SC-009 的 10 s 预算）三条 trace 均补写 `task_failed(failureReason=kernel_restart)` + 对应 ResultSummary 经注入通道投递成功（含 `re-submit` / `NEW eventId` 提示字串）；warm-up 期 submit 收到 `event_rejected_warming_up`；二次 startup 完全幂等不重复投递。 **3/3 GREEN**.
+- [x] T080 [P] [US6] Write failing integration test `tests/integration/test_result_notification.py`：50 条正常 trace 注入 1 条一次性抖动 → 首次成功率 ≥ 96%（与注入率匹配）+ 重试后 100%；专项验证 `[0,1,4,16]` s 退避时序、`deliveryAttempt` 0→1→2→3 字段递增、3 次重试 + 1 次硬失败的 audit 形态、`DeliveryFailedError` 被显式抛出。 **5/5 GREEN**.
+- [x] T081 [P] [US6] Write failing unit test `tests/unit/test_audit_scanner.py`：12 个用例覆盖单 trace 在飞 / 终态被忽略 / 跨文件重建 / `pending_approval` 是在飞 / malformed 行 graceful skip / `idempotent_replay` 不算状态变更 / `scan_and_autofail` 写 `kernel_restart_detected` + `in_flight_auto_failed` + `task_failed(kernel_restart)` / 二次扫描幂等 / 解析 `event_received` 还原 userId+eventId；hypothesis 守护 INV-5（同输入 deterministic 重建）+ INV-6（任一非终态 Task 都被捕获）。 **12/12 GREEN**.
 
 ### Implementation for US6 (GREEN)
 
-- [ ] T082 [US6] Implement audit scanner in `src/orchestrator_kernel/audit/scanner.py`：`scan_and_autofail(audit_dir) -> list[AutoFailedTrace]`；顺序扫描最近 N 天，构建 `{taskId: last_state}`；对未终态集合写 `in_flight_auto_failed` + `task_failed(kernel_restart)`。
-- [ ] T083 [US6] Upgrade `ResultSummary` generator in `src/orchestrator_kernel/notifier/result_summary.py` (替换 T046 的最小版)：按叶 Task 聚合 + 生成 `commandDigest`（原 text → redact → 截断到 256 字符）+ `kernel_restarted` 分支的重投提示。
-- [ ] T084 [US6] Implement delivery with retry in `src/orchestrator_kernel/notifier/delivery.py`：`deliver(summary, channel)` + backoff 序列 `[0, 1, 4, 16]` s；每次失败写 `result_summary_retrying`；3 次全失败写 `notification_delivery_failed`。
-- [ ] T085 [US6] Wire 内核启动序列 in `src/orchestrator_kernel/cli_main.py`：`startup()` → scanner → 批量推送 ResultSummary → 打开入口；扫描期间入口拒 `event_rejected_warming_up`。
-- [ ] T086 [US6] 将正常 trace 的终态也接入 delivery 路径（US1 T046 占位替换）。
-- [ ] T087 [US6] 跑 `pytest tests/integration/test_kernel_restart_recovery.py tests/integration/test_result_notification.py tests/unit/test_audit_scanner.py -q` 全绿，并更新 `validation.md` 记录 SC-009 / SC-010 实测。
+- [x] T082 [US6] Implement audit scanner in `src/orchestrator_kernel/audit/scanner.py`：`AutoFailedTrace` dataclass（traceId / userId / eventId / affectedTaskIds / lastStates）+ `scan_audit_dir()` 顺序扫描 `audit-*.jsonl` 构建 `{taskId: last_state}` 并按 trace-seen 顺序聚合 + `scan_and_autofail()` 写 `kernel_restart_detected`（含统计）+ per-trace `in_flight_auto_failed`（含 affectedTaskIds / userId / eventId）+ per-task `task_failed(failureReason=kernel_restart, previousState=...)`；malformed 行 / IO 错误全部 graceful skip；`since_days` 默认 7d 限制扫描范围。
+- [x] T083 [US6] Upgrade `ResultSummary` generator in `src/orchestrator_kernel/notifier/result_summary.py`：`build_command_digest` 接入 `audit.redact.redact` pipeline（FR-020），任何 >256 byte 文本被替换为 `<redacted:n-bytes:sha256-...>` 后再截断；新增 `build_kernel_restart_summary(*, trace_id, event_id, user_id, command_text, affected_task_ids, capability_hint)` 专为 audit-scanner 路径，自动填 schema-mandated `re-submit` + `NEW eventId` 消息文本；默认 `delivery_attempt=0` 与 JSON-Schema description "0 = first delivery" 对齐（旧默认 1 是契约偏差）。
+- [x] T084 [US6] Implement delivery with retry in `src/orchestrator_kernel/notifier/delivery.py`：`DeliveryChannel` Protocol + `DeliveryAttempt` dataclass + `DeliveryFailedError` + `async deliver(summary, channel, *, audit, backoff_seconds, sleep, clock)` 共 4 次尝试（`DEFAULT_BACKOFF_SECONDS=(0,1,4,16)`）；每次中途失败写 `result_summary_retrying`，最后一次失败只写 `notification_delivery_failed` 并 `raise DeliveryFailedError`；成功写 `result_summary_delivered`；`deliveryAttempt` 通过 `model_copy` 在每次尝试前同步到 0/1/2/3；audit 写入失败永远不掩盖投递异常。
+- [x] T085 [US6] Wire 内核启动序列 in `src/orchestrator_kernel/cli_main.py`：`KernelHarness.__init__` 新增 `audit_dir` / `default_channel` (`_CliPrintChannel` 包装 `print_to_cli`) / `warm_start: bool=True` 参数 + `_ready` flag；新增 `async startup(*, recovery_channel, sleep)` 调用 `scan_and_autofail` → 对每个 `AutoFailedTrace` build `kernel_restart` summary → `await delivery.deliver(...)` → 翻 `_ready=True`；幂等（已 ready 直接 return）；`submit()` 入口在所有逻辑前先检查 `_ready`，未就绪则写 `event_rejected_warming_up` + 立即返回 `traceOutcome="rejected"`（`message="kernel warming up..."`）；`assemble_kernel` 透传 `warm_start` / `default_channel`，默认 `warm_start=True` 保后向兼容（既有 38 个 integration 测试零改动）。
+- [x] T086 [US6] 将正常 trace 的终态也接入 delivery 路径：替换 cli_main.py 中 `print_to_cli(summary) + 手写 result_summary_delivered` 为 `await _delivery.deliver(summary, self._default_channel, audit=self._audit)`；保留 `result_summary_prepared` 独立 emit；audit_event_types 同步追加 `result_summary_delivered` / `notification_delivery_failed`；P1 audit chain 测试（`event_received → trace_created → task_created → task_dispatched → task_started → task_succeeded → result_summary_prepared → result_summary_delivered`）保持有序通过。
+- [x] T087 [US6] 全套 `pytest -q` 501 passed + 1 POSIX-only skip + `ruff check src tests` + `mypy src` 三者皆绿；`scripts/smoke-phase-n.ps1` 6 阶段（Heartbeat / Sandbox / OOM Job Object / ruff / mypy / 全回归）全 PASS；validation.md Evidence #15 记录 SC-009 / SC-010 实测。
 
-**Checkpoint**: 用户无需轮询即可得知每条 trace 的终态；崩溃恢复闭环完成。
+**Checkpoint**: 用户无需轮询即可得知每条 trace 的终态；崩溃恢复闭环完成。**Phase 8 关闭**：US6 三件套（audit scanner + delivery 重试 + startup 序列）全部落地，warm-up 入口门已生效，所有 trace 终态由统一 delivery 路径推送，INV-5/6/7 在 hypothesis + integration 双层测试下被守护。
 
 ---
 
@@ -260,16 +260,16 @@
 
 ### Tests for US7 (RED)
 
-- [ ] T088 [P] [US7] Write failing integration test `tests/integration/test_rate_limit.py`：四维独立场景 + 组合场景；断言 `rejected(reason=rate_limited, dimension=…)` 审计结构并且 Task 队列长度不增。
-- [ ] T089 [P] [US7] Write failing integration test `tests/integration/test_payload_size.py`：100 条 32 KB~2 MB 超大 payload；断言全部在 50 ms 内被拒（SC-011）；Task 队列不增；内核 CPU/mem 无尖峰（通过 psutil 采样）。
-- [ ] T090 [P] [US7] Write failing integration test `tests/integration/test_highrisk_flood.py`：同用户在既有 HIGH_RISK `pending_approval` 期间再投递 HIGH_RISK 事件；断言按 FR-025 第二条拒绝 `rate_limited(user_highrisk_concurrent)`，不触发第二次审批消息。
+- [x] T088 [P] [US7] Write failing integration test `tests/integration/test_rate_limit.py`：四维独立场景 + 组合场景；断言 `rejected(reason=rate_limited, dimension=…)` 审计结构并且 Task 队列长度不增。**Done**: 8 cases — `global_rps` 第三发拒 + 1s 后令牌桶补回；`user_rpm` 第四发拒 + 60s 滑窗外回收；`user_concurrent` 三并发挤掉一发；维度优先级 `global_rps` 先行；rejected 不增 task_created。RED→GREEN 切换在 T092 落地。
+- [x] T089 [P] [US7] Write failing integration test `tests/integration/test_payload_size.py`：100 条 32 KB~2 MB 超大 payload；断言全部在 50 ms 内被拒（SC-011）；Task 队列不增；内核 CPU/mem 无尖峰（通过 psutil 采样）。**Done**: 3 cases — 100 条顺序 + 50 条 `asyncio.gather` + 顺序探测；实测最大单发 < 5 ms（远低于 50 ms 上限）；ΔRSS < 200 MB 守护。
+- [x] T090 [P] [US7] Write failing integration test `tests/integration/test_highrisk_flood.py`：同用户在既有 HIGH_RISK `pending_approval` 期间再投递 HIGH_RISK 事件；断言按 FR-025 第二条拒绝 `rate_limited(user_highrisk_concurrent)`，不触发第二次审批消息。**Done**: 3 cases — 第二发被拒（无第二条 task_pending_approval、无新 trace_created）+ 终态后计数器释放 + 同用户 NORMAL 流量不受影响。`asyncio.wait_for(timeout=0.5)` 守护必须秒拒。
 
 ### Implementation for US7 (GREEN)
 
-- [ ] T091 [US7] Wire payload-size guard（T033）为入口管线**第一步**，先于 schema 校验；在 `cli_main.py` 的 intake pipeline 修改。
-- [ ] T092 [US7] Wire rate limiter (T035) 为入口管线**schema 校验后、idempotency 前**的 gate；按 NORMAL / HIGH_RISK 分支使用不同 counter。
-- [ ] T093 [US7] 在 rate-limiter 增加 `user_highrisk_concurrent` 维度，数据源为"当前 Trace 中 state ∈ {pending_approval, dispatched, running} 且 leaf.riskLevel=HIGH_RISK 的计数"；与 approval gate 共享状态（通过 `KernelState` 单例或 event subscribe）。
-- [ ] T094 [US7] 跑 `pytest tests/integration/test_rate_limit.py tests/integration/test_payload_size.py tests/integration/test_highrisk_flood.py -q` 全绿；记录 SC-011 实测。
+- [x] T091 [US7] Wire payload-size guard（T033）为入口管线**第一步**，先于 schema 校验；在 `cli_main.py` 的 intake pipeline 修改。**Done**: `assert_payload_size` 已是 `submit()` 内 warm-up gate 之后的第一步（早于 `EntryEvent` pydantic 校验）；T089 顺序探测 case 用 1 MB body + 非法 user_id 验证 — `event_received`/`trace_created` 永不出现，`event_rejected_too_large` 落审计。
+- [x] T092 [US7] Wire rate limiter (T035) 为入口管线**schema 校验后、idempotency 前**的 gate；按 NORMAL / HIGH_RISK 分支使用不同 counter。**Done**: `KernelHarness.__init__` 新增 `rate_limits` / `rate_limiter_clock` 参数；`submit()` 在 `EntryEvent` 验证后用 `asyncio.Lock` 包住 `try_admit(risk_level="NORMAL")` 检查 D1-D3；`assemble_kernel` 透传两个参数；终态 + idempotent_replay 路径都 `release()`。
+- [x] T093 [US7] 在 rate-limiter 增加 `user_highrisk_concurrent` 维度，数据源为"当前 Trace 中 state ∈ {pending_approval, dispatched, running} 且 leaf.riskLevel=HIGH_RISK 的计数"；与 approval gate 共享状态（通过 `KernelState` 单例或 event subscribe）。**Done**: `RateLimiter.try_admit_highrisk_only()` / `release_highrisk_only()` 新增；`submit()` 把 `_plan_capability` 提前到 idempotency 之前（plan 是纯函数），仅当 leaf 为 HIGH_RISK 时再做 D4 阶段二检查；阶段二拒绝时回滚 D1-D3 的 admission，确保 rejected 事件不占任何计数器。共享状态通过 `RateLimiter` 内部 `_users[user_id].highrisk_concurrent` 实现 — admit 时增、终态 release 时减，天然覆盖 `pending_approval | dispatched | running` 全段。
+- [x] T094 [US7] 跑 `pytest tests/integration/test_rate_limit.py tests/integration/test_payload_size.py tests/integration/test_highrisk_flood.py -q` 全绿；记录 SC-011 实测。**Done**: 14/14 phase-9 集成绿（8 + 3 + 3）；全回归 515 passed / 1 skipped；ruff + mypy + smoke-phase-n.ps1 6/6 PASS；SC-011 实测最大单发拒绝 < 5 ms（远低于 50 ms 硬上限）。
 
 **Checkpoint**: 输入侧防御墙完成；可演示超大 payload / 审批洪水被秒拒的场景。
 
@@ -279,16 +279,16 @@
 
 **Purpose**: 非阻塞但必须在 `/speckit-analyze` 与合并 `main` 前完成的收尾项。
 
-- [ ] T095 [P] Write property test `tests/unit/test_state_machine_property.py` 守护 INV-2（hypothesis 生成任意 state 序列，断言单向）。
-- [ ] T096 [P] Write property test `tests/unit/test_audit_redact_property.py` 守护 INV-8（hypothesis 生成随机敏感 payload，grep 最终 JSONL 行断言无明文）。
-- [ ] T097 [P] Implement HTTP entry stub in `src/orchestrator_kernel/entrypoints/http.py`（FastAPI，FR-003 预留；MVP 挂一个 `POST /submit` 直调 intake pipeline）。
-- [ ] T098 [P] Implement `feishu_stub` entry in `src/orchestrator_kernel/entrypoints/feishu_stub.py`：只打印"[feishu_stub] received"，证明 channel abstraction 可扩展。
-- [ ] T099 [P] Define `LLMClient` Protocol in `src/orchestrator_kernel/llm/client.py`（无实现；留一个 `NotImplementedLLMClient` 作默认占位，调用即 raise）。
-- [ ] T100 [P] Write `src/orchestrator_kernel/README.md`：对齐 `quickstart.md` 的开发者 recap；列 entry points 与 subpackage 职责。
-- [ ] T101 Run `quickstart.md §2~§5` 全程手动演练；将输出 + 时延 + 审计片段写入 `specs/001-orchestrator-kernel/validation.md`（首次人工验收演练证据，宪法 Article VIII 合并 `main` 的条件之一）。
-- [ ] T102 跑 `pytest -q`（全套）+ `ruff check src tests` + `mypy src`；三者皆绿。
+- [x] T095 [P] Write property test `tests/unit/test_state_machine_property.py` 守护 INV-2（hypothesis 生成任意 state 序列，断言单向）。**5 个 @given 用例全绿（P1 forward-edge soundness、P2 terminal closure、P3 forbidden-edge rejection、P4 random-walk soundness、P5 INV-3 HIGH_RISK gate），覆盖 9 个状态 × 2 risk_level 的全笛卡尔空间，max_examples 累计 320。**
+- [x] T096 [P] Write property test `tests/unit/test_audit_redact_property.py` 守护 INV-8（hypothesis 生成随机敏感 payload，grep 最终 JSONL 行断言无明文）。**7 个 @given 用例全绿（P1 marker shape、P2 allowlist transparency、P3 plaintext absence via 32-char window-scan、P4 idempotency、P5 hash determinism、P6 threshold boundary 严格 ±32、P7 nested object redaction），ASCII + CJK 双 alphabet 覆盖，max_examples 累计 540。**
+- [x] T097 [P] Implement HTTP entry stub in `src/orchestrator_kernel/entrypoints/http.py`（FastAPI，FR-003 预留；MVP 挂一个 `POST /submit` 直调 intake pipeline）。**`create_app(harness)` 工厂返回 FastAPI 实例，`POST /submit` 把 body 转为 `KernelHarness.submit(source_channel="http", …)`，全程继承 Phase 9 payload 16KB / 4 维 rate limit / HIGH_RISK 审批护栏；`GET /healthz` 返回 `{ready, sourceChannel:"http"}`；状态码策略：200 / 413 (payload too large) / 429 (rate_limited) / 400 (ValidationError)；非 200 用 `JSONResponse` 直接返回 TraceResult，无 `detail` 包裹层。新增 deps：`fastapi>=0.110`（运行时）/ `httpx>=0.27`（dev，TestClient 用）。集成测试 5/5 绿（happy path + 幂等回放 + 超大 payload 413 + 缺字段 422 + healthz）。`KernelHarness.submit()` 新增 `source_channel: SourceChannel = "cli"` 参数，向后兼容 CLI/集成 harness 默认值。**
+- [x] T098 [P] Implement `feishu_stub` entry in `src/orchestrator_kernel/entrypoints/feishu_stub.py`：只打印"[feishu_stub] received"，证明 channel abstraction 可扩展。
+- [x] T099 [P] Define `LLMClient` Protocol in `src/orchestrator_kernel/llm/client.py`（无实现；留一个 `NotImplementedLLMClient` 作默认占位，调用即 raise）。
+- [x] T100 [P] Write `src/orchestrator_kernel/README.md`：对齐 `quickstart.md` 的开发者 recap；列 entry points 与 subpackage 职责。
+- [x] T101 Run `quickstart.md §2~§5` 全程手动演练；将输出 + 时延 + 审计片段写入 `specs/001-orchestrator-kernel/validation.md`（首次人工验收演练证据，宪法 Article VIII 合并 `main` 的条件之一）。
+- [x] T102 跑 `pytest -q`（全套）+ `ruff check src tests` + `mypy src`；三者皆绿。
 - [x] T103 更新 spec.md FR-024 措辞："5 类 schema" → "9 类 schema" + 版本号自 `1.0.0 → 1.1.0`（MINOR 扩展）；同步到 `checklists/requirements.md` 的 Resolution Log。**（已在 /speckit-analyze 后的 R2 补丁中提前完成，2026-04-21）**
-- [ ] T104 在 `specs/001-orchestrator-kernel/analysis-precheck.md` 写一张 FR × Task 覆盖矩阵，供下一步 `/speckit-analyze` 消费。
+- [x] T104 在 `specs/001-orchestrator-kernel/analysis-precheck.md` 写一张 FR × Task 覆盖矩阵，供下一步 `/speckit-analyze` 消费。
 
 **Checkpoint**: 全绿 + 手动验收 + 覆盖矩阵齐备；具备 `/speckit-analyze` 条件。
 

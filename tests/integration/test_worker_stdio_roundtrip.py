@@ -33,25 +33,35 @@ from orchestrator_kernel.contracts.worker_protocol import WorkerFrame
 
 
 def _read_one_frame(proc: subprocess.Popen[bytes], timeout_s: float = 2.0) -> dict:
-    """Read one JSON-line frame from `proc.stdout`, enforcing the wire format."""
+    """Read one JSON-line frame from `proc.stdout`, enforcing the wire format.
+
+    Heartbeat frames (FR-009 / T076) are transparently skipped so the
+    register/dispatch/started/result sequence asserts stay readable. The
+    wire-format checks (LF terminator, no embedded newlines, trim
+    whitespace) are still enforced against every intermediate line,
+    including heartbeats.
+    """
     assert proc.stdout is not None
     deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"no frame from worker within {timeout_s}s (stderr: "
+                f"{proc.stderr.read() if proc.stderr else b''!r})"
+            )
         line = proc.stdout.readline()
-        if line:
-            break
-        time.sleep(0.01)
-    else:
-        raise TimeoutError(
-            f"no frame from worker within {timeout_s}s (stderr: "
-            f"{proc.stderr.read() if proc.stderr else b''!r})"
-        )
-
-    assert line.endswith(b"\n"), f"frame not LF-terminated: {line!r}"
-    body = line[:-1]
-    assert b"\n" not in body, f"frame contains embedded newline: {line!r}"
-    assert body == body.strip(), f"frame has surrounding whitespace: {line!r}"
-    return json.loads(body.decode("utf-8"))
+        if not line:
+            time.sleep(0.01)
+            continue
+        assert line.endswith(b"\n"), f"frame not LF-terminated: {line!r}"
+        body = line[:-1]
+        assert b"\n" not in body, f"frame contains embedded newline: {line!r}"
+        assert body == body.strip(), f"frame has surrounding whitespace: {line!r}"
+        obj = json.loads(body.decode("utf-8"))
+        if isinstance(obj, dict) and obj.get("kind") == "heartbeat":
+            continue
+        return obj
 
 
 @pytest.mark.integration

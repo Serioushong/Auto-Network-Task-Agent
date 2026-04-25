@@ -85,11 +85,34 @@ PowerShell 提示：`&&` 不支持；heredoc 走 `git commit -F <file>` 或临�
    - 追加一条 `validation.md` Evidence #N（UTC 时间戳、命令、输出摘要、诊断披露）
    - commit 到 `hjx`（按上面模板）
 
+## Phase 10（主 Agent / 子 Agent 协作体系）接手说明
+
+当当前 chat 进入 Phase 10 及以后阶段时，除了读取本规则文件外，还必须先读取以下 Phase 10 草案文档，确保新 chat 可无缝衔接：
+
+- `specs/001-orchestrator-kernel/phase10-tasks.md`
+- `specs/001-orchestrator-kernel/phase10-validation.md`
+- `specs/001-orchestrator-kernel/phase10-review-checklist.md`
+- `specs/001-orchestrator-kernel/phase10-batches.md`
+- `specs/001-orchestrator-kernel/phase10-contracts.md`
+- `specs/001-orchestrator-kernel/phase10-schema-sketch.md`
+
+### Phase 10 已确认的硬约束
+
+- 第二阶段目标不是“再加一个入口”，而是建立 **主 agent + 单层子 agent** 协作体系。
+- **主 agent** 负责控制面：接收请求、路由、取消、失败处理、审计、结果汇总。
+- **子 agent** 第一版只做 **单能力**，并且必须是 **独立进程 / worker**。
+- 第一版路由方式固定采用 **capability-based** 规则匹配，不使用 LLM 路由。
+- **CLI / HTTP / Feishu** 三种入口都必须统一进入主 agent，不允许各自维护独立编排逻辑。
+- 第二阶段的第一优先级是 **审计全链路与可回放**。
+- 跨边界消息必须先定契约（JSON Schema + pydantic v2），再写实现。
+- Phase 10 进入实现前，先完成契约冻结 → 契约测试 → 主 agent 核心 → 子 agent worker → 入口统一接入 → 联调与回放的批次顺序。
+
 ## 上下文管理
 
 单次 chat 承载过多 Phase 会触发 token 预算撞墙。分批策略：
 - 每个 Phase 拆 ≤ 3 个 commit 批次；每批次一个独立 commit
 - Phase 切换时开新 chat，靠本规则 + `tasks.md` + `validation.md` 接手
+- Phase 10 及以后新 chat 接手时，必须额外读取 Phase 10 草案文件以保证上下文连续
 - 复杂 review / 审计类任务优先派 `explore` readonly 子 agent，附精确文件清单
 
 <!-- SPECKIT END -->

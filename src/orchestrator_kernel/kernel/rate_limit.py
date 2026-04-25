@@ -125,6 +125,39 @@ class RateLimiter:
         if risk_level == "HIGH_RISK" and state.highrisk_concurrent > 0:
             state.highrisk_concurrent -= 1
 
+    # ------------------------------------------------------------------
+    # T093 — second-stage gate: the leaf risk level only emerges from the
+    # planner, so D4 must be checkable AFTER an event has already been
+    # admitted on D1-D3 with ``risk_level="NORMAL"``.
+    # ------------------------------------------------------------------
+
+    def try_admit_highrisk_only(
+        self, *, user_id: str
+    ) -> RateLimitDecision:
+        """Check ONLY the ``user_highrisk_concurrent`` gate.
+
+        Returns ``admitted=True`` (and increments the highrisk counter)
+        if the user has zero in-flight HIGH_RISK Tasks; otherwise
+        returns ``admitted=False`` with ``dimension="user_highrisk_concurrent"``.
+        Caller MUST have already admitted on D1-D3 — release of those
+        counters stays the caller's responsibility.
+        """
+        state = self._users.setdefault(user_id, _UserState())
+        if state.highrisk_concurrent >= self._limits.user_highrisk_concurrent:
+            return RateLimitDecision(
+                admitted=False, dimension="user_highrisk_concurrent"
+            )
+        state.highrisk_concurrent += 1
+        return RateLimitDecision(admitted=True, dimension=None)
+
+    def release_highrisk_only(self, *, user_id: str) -> None:
+        """Decrement ONLY the highrisk counter (paired with the helper above)."""
+        state = self._users.get(user_id)
+        if state is None:
+            return
+        if state.highrisk_concurrent > 0:
+            state.highrisk_concurrent -= 1
+
     def _refill_global(self, now: datetime) -> None:
         if now <= self._global_last_refill:
             return
