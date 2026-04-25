@@ -25,7 +25,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from ..contracts.phase10 import AgentCapability
@@ -90,11 +91,7 @@ def _extract_payload_fields(payload: dict[str, Any]) -> dict[str, str | None]:
         or sender.get("union_id")
         or payload.get("userId")
     )
-    event_id = (
-        event.get("message_id")
-        or event.get("event_id")
-        or payload.get("eventId")
-    )
+    event_id = event.get("message_id") or event.get("event_id") or payload.get("eventId")
     return {
         "text": text if isinstance(text, str) else None,
         "userId": user_id if isinstance(user_id, str) else None,
@@ -116,8 +113,12 @@ def _verify_webhook(
     timestamp_header: str | None,
     nonce_header: str | None,
 ) -> None:
-    expected_token = os.environ.get("FEISHU_VERIFICATION_TOKEN") or os.environ.get("FEISHU_WEBHOOK_VERIFICATION_TOKEN") or None
-    expected_secret = os.environ.get("FEISHU_ENCRYPT_KEY") or os.environ.get("FEISHU_WEBHOOK_APP_SECRET") or None
+    expected_token = os.environ.get("FEISHU_VERIFICATION_TOKEN") or os.environ.get(
+        "FEISHU_WEBHOOK_VERIFICATION_TOKEN"
+    ) or None
+    expected_secret = os.environ.get("FEISHU_ENCRYPT_KEY") or os.environ.get(
+        "FEISHU_WEBHOOK_APP_SECRET"
+    ) or None
     stub_token = os.environ.get("FEISHU_STUB_TOKEN") or None
 
     if expected_token:
@@ -144,7 +145,6 @@ async def handle_message(
     event_id: str | None = None,
     audit_dir: Path = Path("var/audit"),
 ) -> dict[str, Any]:
-    """Submit a Feishu-shaped message through the shared adapter path."""
     adapter = _feishu_adapter(audit_dir)
     result = adapter.submit(
         text=text,
@@ -166,18 +166,10 @@ async def handle_message(
 async def handle_payload(payload: dict[str, Any]) -> dict[str, Any]:
     fields = _extract_payload_fields(payload)
     message = FeishuMessage.model_validate(fields)
-    return await handle_message(
-        text=message.text,
-        user_id=message.userId,
-        event_id=message.eventId,
-    )
+    return await handle_message(text=message.text, user_id=message.userId, event_id=message.eventId)
 
 
-def create_app(
-    audit_dir: Path = Path("var/audit"),
-    *,
-    expected_token: str | None = None,
-) -> FastAPI:
+def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | None = None) -> FastAPI:
     app = FastAPI(title="Orchestrator Kernel Feishu Stub", version="0.1.0")
     if expected_token is not None:
         os.environ["FEISHU_STUB_TOKEN"] = expected_token
@@ -186,70 +178,39 @@ def create_app(
     async def healthz() -> dict[str, Any]:
         return {"ready": True, "sourceChannel": "feishu_stub"}
 
-    async def _process_request(
-        request: Request,
-        payload: dict[str, Any],
-        x_feishu_token: str | None,
-        x_lark_signature: str | None,
-        x_lark_request_timestamp: str | None,
-        x_lark_request_nonce: str | None,
-    ) -> Any:
-        if isinstance(payload, dict) and "challenge" in payload:
-            return {"challenge": payload["challenge"]}
+    async def _process_request(request: Request) -> JSONResponse:
         raw_body = await request.body()
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="invalid json body") from exc
+        if isinstance(payload, dict) and "challenge" in payload:
+            return JSONResponse(content={"challenge": payload["challenge"]})
         _verify_webhook(
             body=raw_body,
-            token_header=x_feishu_token,
-            signature_header=x_lark_signature,
-            timestamp_header=x_lark_request_timestamp,
-            nonce_header=x_lark_request_nonce,
+            token_header=request.headers.get("x-feishu-token"),
+            signature_header=request.headers.get("x-lark-signature"),
+            timestamp_header=request.headers.get("x-lark-request-timestamp"),
+            nonce_header=request.headers.get("x-lark-request-nonce"),
         )
         try:
-            return await handle_payload(payload)
+            result = await handle_payload(payload)
+            return JSONResponse(content=result)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail={"errors": exc.errors()}) from exc
 
     @app.post("/feishu/submit")
-    async def submit(
-        request: Request,
-        payload: dict[str, Any] = Body(...),
-        x_feishu_token: str | None = Header(default=None, alias="X-Feishu-Token"),
-        x_lark_signature: str | None = Header(default=None, alias="X-Lark-Signature"),
-        x_lark_request_timestamp: str | None = Header(default=None, alias="X-Lark-Request-Timestamp"),
-        x_lark_request_nonce: str | None = Header(default=None, alias="X-Lark-Request-Nonce"),
-    ) -> Any:
-        return await _process_request(
-            request,
-            payload,
-            x_feishu_token,
-            x_lark_signature,
-            x_lark_request_timestamp,
-            x_lark_request_nonce,
-        )
+    async def submit(request: Request) -> JSONResponse:
+        return await _process_request(request)
 
     @app.post("/feishu/webhook")
-    async def webhook(
-        request: Request,
-        payload: dict[str, Any] = Body(...),
-        x_feishu_token: str | None = Header(default=None, alias="X-Feishu-Token"),
-        x_lark_signature: str | None = Header(default=None, alias="X-Lark-Signature"),
-        x_lark_request_timestamp: str | None = Header(default=None, alias="X-Lark-Request-Timestamp"),
-        x_lark_request_nonce: str | None = Header(default=None, alias="X-Lark-Request-Nonce"),
-    ) -> Any:
-        return await _process_request(
-            request,
-            payload,
-            x_feishu_token,
-            x_lark_signature,
-            x_lark_request_timestamp,
-            x_lark_request_nonce,
-        )
+    async def webhook(request: Request) -> JSONResponse:
+        return await _process_request(request)
 
     return app
 
 
 def main() -> None:
-    """Read a JSON payload from stdin and execute it locally."""
     raw = json.load(__import__("sys").stdin)
     try:
         result = asyncio.run(handle_payload(raw))
