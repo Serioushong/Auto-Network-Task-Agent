@@ -107,6 +107,6 @@ def test_feishu_signature_guard_accepts_valid_signature() -> None:
 
 def test_challenge_verification_echoes_challenge_immediately() -> None:
     client = TestClient(create_app())
-    resp = client.post("/feishu/webhook", json={"challenge": "abc123"})
+    resp = client.post("/feishu/webhook", json={"CHALLENGE": "abc123"})
     assert resp.status_code == 200
-    assert resp.json() == {"challenge": "abc123"}
+    assert resp.json() == {"CHALLENGE": "abc123"}

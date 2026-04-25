@@ -184,8 +184,10 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
             payload = json.loads(raw_body.decode("utf-8") or "{}")
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=400, detail="invalid json body") from exc
-        if isinstance(payload, dict) and "challenge" in payload:
-            return JSONResponse(content={"challenge": payload["challenge"]})
+        if isinstance(payload, dict):
+            challenge = payload.get("CHALLENGE") if isinstance(payload.get("CHALLENGE"), str) else payload.get("challenge") if isinstance(payload.get("challenge"), str) else None
+            if challenge is not None:
+                return JSONResponse(content={"CHALLENGE": challenge})
         _verify_webhook(
             body=raw_body,
             token_header=request.headers.get("x-feishu-token"),
