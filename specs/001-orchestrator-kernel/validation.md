@@ -175,6 +175,22 @@
 
 ## Evidence #11 — Phase 10 real wiring + audit replay smoke
 
+---
+
+## Evidence #12 — Phase 3 Feishu demo HTTP stub + shared adapter path
+
+- **UTC**: 2026-04-25T01:40:00Z
+- **Host**: Windows 10 (19045), PowerShell 5.1
+- **Task**: Phase 3 Feishu demo / deployment prep
+- **Commands**:
+  - `uv run pytest tests\unit\test_feishu_stub_entrypoint.py -q` → `4 passed in 0.44s`
+- **Scope of test**: Feishu stub payload validation, HTTP stub endpoint, shared adapter path reuse, Docker-friendly local demo flow
+- **Artifacts updated**:
+  - `src/orchestrator_kernel/entrypoints/feishu_stub.py`
+  - `tests/unit/test_feishu_stub_entrypoint.py`
+- **Conclusion**: ✅ Feishu stub can now serve `/healthz` and `/feishu/submit` as a local demo/service entry, reusing the shared Phase 10 adapter path.
+- **Next gate**: Deploy to cloud server / attach real Feishu webhook + HTTPS.
+
 - **UTC**: 2026-04-25T01:10:00Z
 - **Host**: Windows 10 (19045), PowerShell 5.1
 - **Task**: Phase 10 real kernel wiring + audit replay smoke

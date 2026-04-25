@@ -1,4 +1,4 @@
-"""T098 — Feishu stub entrypoint.
+"""T098 — Feishu stub / webhook entrypoint.
 
 This module provides the smallest useful Feishu-shaped adapter for the
 local MVP:
@@ -8,19 +8,24 @@ local MVP:
 - run the same execution pipeline used by CLI / HTTP
 - print the result so a caller can forward it back to chat
 
-It does not call the real Feishu API yet. That remains a later
-integration step. The point here is to prove that Feishu can be a thin
-adapter over the already-working kernel core.
+It now also supports the minimal real webhook verification flow:
+- challenge echo on initial URL verification
+- optional verification token guard
+- optional HMAC-SHA256 signature guard
+- Feishu-style webhook payload extraction
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
+import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from ..contracts.phase10 import AgentCapability
@@ -61,6 +66,77 @@ def _feishu_adapter(audit_dir: Path) -> Phase10EntrypointAdapter:
     return Phase10EntrypointAdapter(runtime)
 
 
+def _extract_payload_fields(payload: dict[str, Any]) -> dict[str, str | None]:
+    if "text" in payload and isinstance(payload.get("text"), str):
+        return {
+            "text": payload["text"],
+            "userId": payload.get("userId") if isinstance(payload.get("userId"), str) else None,
+            "eventId": payload.get("eventId") if isinstance(payload.get("eventId"), str) else None,
+        }
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
+    text = message.get("text") or message.get("content") or payload.get("text")
+    if isinstance(text, str):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and isinstance(parsed.get("text"), str):
+                text = parsed["text"]
+        except json.JSONDecodeError:
+            pass
+    user_id = (
+        sender.get("sender_id")
+        or sender.get("open_id")
+        or sender.get("union_id")
+        or payload.get("userId")
+    )
+    event_id = (
+        event.get("message_id")
+        or event.get("event_id")
+        or payload.get("eventId")
+    )
+    return {
+        "text": text if isinstance(text, str) else None,
+        "userId": user_id if isinstance(user_id, str) else None,
+        "eventId": event_id if isinstance(event_id, str) else None,
+    }
+
+
+def _constant_time_eq(left: str | None, right: str | None) -> bool:
+    if left is None or right is None:
+        return False
+    return hmac.compare_digest(left, right)
+
+
+def _verify_webhook(
+    *,
+    body: bytes,
+    token_header: str | None,
+    signature_header: str | None,
+    timestamp_header: str | None,
+    nonce_header: str | None,
+) -> None:
+    expected_token = os.environ.get("FEISHU_VERIFICATION_TOKEN") or os.environ.get("FEISHU_WEBHOOK_VERIFICATION_TOKEN") or None
+    expected_secret = os.environ.get("FEISHU_ENCRYPT_KEY") or os.environ.get("FEISHU_WEBHOOK_APP_SECRET") or None
+    stub_token = os.environ.get("FEISHU_STUB_TOKEN") or None
+
+    if expected_token:
+        if not _constant_time_eq(token_header, expected_token):
+            raise HTTPException(status_code=401, detail="invalid webhook verification token")
+    elif stub_token:
+        if not _constant_time_eq(token_header, stub_token):
+            raise HTTPException(status_code=401, detail="invalid stub token")
+
+    if expected_secret:
+        if not (signature_header and timestamp_header and nonce_header):
+            raise HTTPException(status_code=401, detail="missing signature headers")
+        canonical = f"{timestamp_header}\n{nonce_header}\n".encode("utf-8") + body
+        digest = hmac.new(expected_secret.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
+        expected_sig = f"v1={digest}"
+        if not _constant_time_eq(signature_header, expected_sig):
+            raise HTTPException(status_code=401, detail="invalid webhook signature")
+
+
 async def handle_message(
     *,
     text: str,
@@ -88,7 +164,8 @@ async def handle_message(
 
 
 async def handle_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    message = FeishuMessage.model_validate(payload)
+    fields = _extract_payload_fields(payload)
+    message = FeishuMessage.model_validate(fields)
     return await handle_message(
         text=message.text,
         user_id=message.userId,
@@ -96,19 +173,77 @@ async def handle_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def create_app(audit_dir: Path = Path("var/audit")) -> FastAPI:
+def create_app(
+    audit_dir: Path = Path("var/audit"),
+    *,
+    expected_token: str | None = None,
+) -> FastAPI:
     app = FastAPI(title="Orchestrator Kernel Feishu Stub", version="0.1.0")
+    if expected_token is not None:
+        os.environ["FEISHU_STUB_TOKEN"] = expected_token
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
         return {"ready": True, "sourceChannel": "feishu_stub"}
 
-    @app.post("/feishu/submit")
-    async def submit(payload: dict[str, Any] = Body(...)) -> Any:
+    async def _process_request(
+        request: Request,
+        payload: dict[str, Any],
+        x_feishu_token: str | None,
+        x_lark_signature: str | None,
+        x_lark_request_timestamp: str | None,
+        x_lark_request_nonce: str | None,
+    ) -> Any:
+        if isinstance(payload, dict) and "challenge" in payload:
+            return {"challenge": payload["challenge"]}
+        raw_body = await request.body()
+        _verify_webhook(
+            body=raw_body,
+            token_header=x_feishu_token,
+            signature_header=x_lark_signature,
+            timestamp_header=x_lark_request_timestamp,
+            nonce_header=x_lark_request_nonce,
+        )
         try:
             return await handle_payload(payload)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail={"errors": exc.errors()}) from exc
+
+    @app.post("/feishu/submit")
+    async def submit(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+        x_feishu_token: str | None = Header(default=None, alias="X-Feishu-Token"),
+        x_lark_signature: str | None = Header(default=None, alias="X-Lark-Signature"),
+        x_lark_request_timestamp: str | None = Header(default=None, alias="X-Lark-Request-Timestamp"),
+        x_lark_request_nonce: str | None = Header(default=None, alias="X-Lark-Request-Nonce"),
+    ) -> Any:
+        return await _process_request(
+            request,
+            payload,
+            x_feishu_token,
+            x_lark_signature,
+            x_lark_request_timestamp,
+            x_lark_request_nonce,
+        )
+
+    @app.post("/feishu/webhook")
+    async def webhook(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+        x_feishu_token: str | None = Header(default=None, alias="X-Feishu-Token"),
+        x_lark_signature: str | None = Header(default=None, alias="X-Lark-Signature"),
+        x_lark_request_timestamp: str | None = Header(default=None, alias="X-Lark-Request-Timestamp"),
+        x_lark_request_nonce: str | None = Header(default=None, alias="X-Lark-Request-Nonce"),
+    ) -> Any:
+        return await _process_request(
+            request,
+            payload,
+            x_feishu_token,
+            x_lark_signature,
+            x_lark_request_timestamp,
+            x_lark_request_nonce,
+        )
 
     return app
 

@@ -279,15 +279,15 @@
 - [x] P109 [P] 将 HTTP 入口统一接入主 agent 路由。 *(已完成 Phase 10 Batch E: entrypoint adapter 统一提交路径，HTTP 后续可直接复用)*
 - [x] P110 [P] 将 Feishu 入口统一接入主 agent 路由。 *(已完成 Phase 10 Batch E: entrypoint adapter 统一提交路径，Feishu 后续可直接复用)*
 - [x] P111 [P] 做主 / 子 agent 端到端联调并验证审计可回放。 *(已完成 Phase 10 Batch F smoke: `tests/integration/test_phase10_full_flow.py` 通过)*
-- [x] P112 [P] 将 CLI `submit` 真正挂接到 Phase 10 adapter path，并保留 fallback 兼容路径。 *(已完成 real wiring)*
-- [x] P113 [P] 将 HTTP `submit` 真正挂接到 Phase 10 adapter path，并保留 fallback 兼容路径。 *(已完成 real wiring)*
-- [x] P114 [P] 增加 Phase 10 审计回放 smoke，验证 route / dispatch 审计落盘可见。 *(已完成 `tests/integration/test_phase10_audit_replay_smoke.py`)*
+- [x] P115 [P] 将 CLI `submit` 真正挂接到 Phase 10 adapter path，并保留 fallback 兼容路径。 *(已完成 real wiring)*
+- [x] P116 [P] 将 HTTP `submit` 真正挂接到 Phase 10 adapter path，并保留 fallback 兼容路径。 *(已完成 real wiring)*
+- [x] P117 [P] 增加 Phase 10 审计回放 smoke，验证 route / dispatch 审计落盘可见。 *(已完成 `tests/integration/test_phase10_audit_replay_smoke.py`)*
 
 ### Phase 10.5 — 收尾与证据
 
-- [x] P112 追加 Phase 10 的 `validation.md` Evidence 记录。 *(已完成 Evidence #11)*
-- [x] P113 更新本 `tasks.md` 中 Phase 10 任务完成状态与批注。 *(已完成本次同步)*
-- [x] P114 形成 Phase 10 review summary，作为后续继续推进的接手材料。 *(已完成，见本轮总结)*
+- [x] P118 追加 Phase 10 的 `validation.md` Evidence 记录。 *(已完成 Evidence #11 / #12)*
+- [x] P119 更新本 `tasks.md` 中 Phase 10 任务完成状态与批注。 *(已完成本次同步)*
+- [x] P120 形成 Phase 10 review summary，作为后续继续推进的接手材料。 *(已完成，见本轮总结)*
 
 ---
 

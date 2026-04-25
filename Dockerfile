@@ -5,11 +5,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     UV_LINK_MODE=copy \
-    PYTHONPATH=/app/src
+    PYTHONPATH=/app/src \
+    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
 
 WORKDIR /app
 
-RUN apt-get update \
+RUN sed -i 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g; s|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -22,4 +25,4 @@ RUN uv sync --frozen --no-dev
 
 EXPOSE 8001
 
-CMD ["uv", "run", "uvicorn", "orchestrator_kernel.entrypoints.feishu_stub:create_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["python", "-m", "uvicorn", "orchestrator_kernel.entrypoints.feishu_stub:create_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]
