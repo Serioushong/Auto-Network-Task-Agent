@@ -32,21 +32,12 @@ from typing import Any
 from Crypto.Cipher import AES
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from ..contracts.phase10 import AgentCapability
-from ..kernel.dispatcher import Dispatcher, WorkerHandle
-from ..phase10_agent import AgentRegistry, MainAgentRouter, MainAgentRuntime
-from ..phase10_entrypoints import Phase10EntrypointAdapter
-
-
-class FeishuMessage(BaseModel):
-    text: str = Field(min_length=1)
-    userId: str = Field(min_length=1, max_length=128)
-    eventId: str | None = Field(default=None, min_length=16, max_length=64)
+from .feishu_common import FeishuMessage, handle_payload as shared_handle_payload
 
 
 class AESCipher:
@@ -66,73 +57,6 @@ class AESCipher:
         decoded = base64.b64decode(enc)
         return self.decrypt(decoded).decode("utf-8")
 
-
-def _feishu_adapter(audit_dir: Path) -> Phase10EntrypointAdapter:
-    registry = AgentRegistry()
-    capability = AgentCapability.model_validate(
-        {
-            "agentId": "feishu-phase10-echo",
-            "capability": "echo.say",
-            "version": "1.0.0",
-            "riskLevel": "NORMAL",
-            "healthy": True,
-            "resourceLimits": {"memoryMb": 128, "cpuPct": 10, "wallClockMs": 60000},
-        }
-    )
-    registry.register(capability)
-    dispatcher = Dispatcher()
-    dispatcher.register(
-        WorkerHandle(
-            worker_id=capability.agentId,
-            capabilities=tuple(),
-            healthy=True,
-            metadata={"capability": capability.capability},
-        )
-    )
-    runtime = MainAgentRuntime(router=MainAgentRouter(dispatcher, registry))
-    return Phase10EntrypointAdapter(runtime)
-
-
-def _extract_payload_fields(payload: dict[str, Any]) -> dict[str, str | None]:
-    if "text" in payload and isinstance(payload.get("text"), str):
-        return {
-            "text": payload["text"],
-            "userId": payload.get("userId") if isinstance(payload.get("userId"), str) else None,
-            "eventId": payload.get("eventId") if isinstance(payload.get("eventId"), str) else None,
-        }
-
-    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
-    message = event.get("message") if isinstance(event.get("message"), dict) else {}
-    sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
-    header = payload.get("header") if isinstance(payload.get("header"), dict) else {}
-
-    text = message.get("content") or message.get("text") or payload.get("text")
-    if isinstance(text, str):
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict) and isinstance(parsed.get("text"), str):
-                text = parsed["text"]
-        except json.JSONDecodeError:
-            pass
-
-    sender_id = sender.get("sender_id") if isinstance(sender.get("sender_id"), dict) else None
-    user_id = None
-    if isinstance(sender_id, dict):
-        user_id = sender_id.get("user_id") or sender_id.get("open_id") or sender_id.get("union_id")
-    else:
-        user_id = (
-            sender.get("sender_id")
-            or sender.get("open_id")
-            or sender.get("union_id")
-            or payload.get("userId")
-        )
-
-    event_id = header.get("event_id") or event.get("message_id") or event.get("event_id") or payload.get("eventId")
-    return {
-        "text": text if isinstance(text, str) else None,
-        "userId": user_id if isinstance(user_id, str) else None,
-        "eventId": event_id if isinstance(event_id, str) else None,
-    }
 
 
 def _constant_time_eq(left: str | None, right: str | None) -> bool:
@@ -218,9 +142,7 @@ async def handle_message(
 
 
 async def handle_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    fields = _extract_payload_fields(payload)
-    message = FeishuMessage.model_validate(fields)
-    return await handle_message(text=message.text, user_id=message.userId, event_id=message.eventId)
+    return await shared_handle_payload(payload)
 
 
 def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | None = None) -> FastAPI:
