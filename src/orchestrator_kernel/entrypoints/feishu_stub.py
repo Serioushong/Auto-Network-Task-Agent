@@ -13,11 +13,13 @@ It now also supports the minimal real webhook verification flow:
 - optional verification token guard
 - optional HMAC-SHA256 signature guard
 - Feishu-style webhook payload extraction
+- encrypted payload decryption when ``encrypt`` is present
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -27,12 +29,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, ValidationError
+from Crypto.Cipher import AES
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
 
 from ..contracts.phase10 import AgentCapability
 from ..kernel.dispatcher import Dispatcher, WorkerHandle
@@ -44,6 +46,24 @@ class FeishuMessage(BaseModel):
     text: str = Field(min_length=1)
     userId: str = Field(min_length=1, max_length=128)
     eventId: str | None = Field(default=None, min_length=16, max_length=64)
+
+
+class AESCipher:
+    def __init__(self, key: str) -> None:
+        self.key = hashlib.sha256(key.encode("utf-8")).digest()
+
+    @staticmethod
+    def _unpad(data: bytes) -> bytes:
+        return data[:-data[-1]]
+
+    def decrypt(self, enc: bytes) -> bytes:
+        iv = enc[: AES.block_size]
+        cipher = AES.new(self.key, AES.MODE_CBC, iv)
+        return self._unpad(cipher.decrypt(enc[AES.block_size :]))
+
+    def decrypt_string(self, enc: str) -> str:
+        decoded = base64.b64decode(enc)
+        return self.decrypt(decoded).decode("utf-8")
 
 
 def _feishu_adapter(audit_dir: Path) -> Phase10EntrypointAdapter:
@@ -141,6 +161,26 @@ def _verify_webhook(
             raise HTTPException(status_code=401, detail="invalid webhook signature")
 
 
+def _decrypt_envelope(payload: dict[str, Any]) -> dict[str, Any]:
+    encrypt_value = payload.get("encrypt")
+    if not isinstance(encrypt_value, str):
+        return payload
+    encrypt_key = os.environ.get("FEISHU_ENCRYPT_KEY") or os.environ.get("FEISHU_WEBHOOK_APP_SECRET")
+    if not encrypt_key:
+        raise HTTPException(status_code=500, detail="missing FEISHU_ENCRYPT_KEY")
+    cipher = AESCipher(encrypt_key)
+    decrypted = cipher.decrypt_string(encrypt_value)
+    logger.info("feishu_webhook_request decrypted envelope: %s", decrypted)
+    print(f"[feishu_webhook_request] decrypted={decrypted}", flush=True)
+    try:
+        inner = json.loads(decrypted)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid decrypted json") from exc
+    if not isinstance(inner, dict):
+        raise HTTPException(status_code=400, detail="decrypted payload must be a JSON object")
+    return inner
+
+
 async def handle_message(
     *,
     text: str,
@@ -197,6 +237,10 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
             print(f"[feishu_webhook_request] invalid_json path={request.url.path} body={raw_body!r}", flush=True)
             logger.warning("feishu_webhook_request invalid_json path=%s", request.url.path)
             raise HTTPException(status_code=400, detail="invalid json body") from exc
+
+        if isinstance(payload, dict) and "encrypt" in payload:
+            payload = _decrypt_envelope(payload)
+
         if isinstance(payload, dict):
             challenge = None
             if isinstance(payload.get("CHALLENGE"), str):
@@ -207,6 +251,7 @@ def create_app(audit_dir: Path = Path("var/audit"), *, expected_token: str | Non
                 print(f"[feishu_webhook_request] challenge_echo path={request.url.path} challenge={challenge}", flush=True)
                 logger.info("feishu_webhook_request challenge_echo path=%s", request.url.path)
                 return JSONResponse(content={"CHALLENGE": challenge})
+
         _verify_webhook(
             body=raw_body,
             token_header=request.headers.get("x-feishu-token"),

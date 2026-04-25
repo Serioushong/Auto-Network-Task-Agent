@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
-import hmac
 import json
 import os
-
 from fastapi.testclient import TestClient
 
 from orchestrator_kernel.entrypoints.feishu_stub import (
@@ -110,3 +109,17 @@ def test_challenge_verification_echoes_challenge_immediately() -> None:
     resp = client.post("/feishu/webhook", json={"CHALLENGE": "abc123"})
     assert resp.status_code == 200
     assert resp.json() == {"CHALLENGE": "abc123"}
+
+
+def test_encrypted_payload_challenge_short_circuits_when_decrypted_envelope_present() -> None:
+    from orchestrator_kernel.entrypoints.feishu_stub import _decrypt_envelope
+
+    previous = os.environ.get("FEISHU_ENCRYPT_KEY")
+    os.environ["FEISHU_ENCRYPT_KEY"] = "test key"
+    try:
+        assert _decrypt_envelope({"encrypt": "dGVzdA=="}) != {"encrypt": "dGVzdA=="}
+    finally:
+        if previous is None:
+            os.environ.pop("FEISHU_ENCRYPT_KEY", None)
+        else:
+            os.environ["FEISHU_ENCRYPT_KEY"] = previous

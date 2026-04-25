@@ -28,6 +28,7 @@ dependencies = [
     "ulid-py>=1.1",
     "fastapi>=0.110",
     "uvicorn>=0.30",
+    "pycryptodome>=3.20",
 ]
 
 [project.scripts]
